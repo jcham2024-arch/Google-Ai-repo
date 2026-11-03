@@ -34,6 +34,13 @@ object ProviderPresets {
             defaultModel = "llama-3.3-70b-versatile"
         ),
         ProviderSettings(
+            id = "deepseek",
+            name = "DeepSeek",
+            baseUrl = "https://api.deepseek.com/v1",
+            apiKey = "",
+            defaultModel = "deepseek-chat"
+        ),
+        ProviderSettings(
             id = "openai",
             name = "OpenAI",
             baseUrl = "https://api.openai.com/v1",

@@ -20,6 +20,8 @@ val Context.providerDataStore: DataStore<Preferences> by preferencesDataStore(na
 
 class ProviderConfigurationManager(private val context: Context) {
 
+    private val keyStoreManager = AndroidKeyStoreManager()
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -43,12 +45,14 @@ class ProviderConfigurationManager(private val context: Context) {
                 for (i in 0 until array.length()) {
                     val obj = array.getJSONObject(i)
                     val id = obj.getString("id")
+                    val encryptedKey = obj.optString("apiKey", "")
+                    val decryptedKey = if (encryptedKey.isNotBlank()) keyStoreManager.decrypt(encryptedKey).ifBlank { encryptedKey } else ""
                     list.add(
                         ProviderSettings(
                             id = id,
                             name = obj.getString("name"),
                             baseUrl = obj.getString("baseUrl"),
-                            apiKey = obj.optString("apiKey", ""),
+                            apiKey = decryptedKey,
                             defaultModel = obj.optString("defaultModel", "default-model"),
                             isActive = id == activeId
                         )
@@ -80,12 +84,15 @@ class ProviderConfigurationManager(private val context: Context) {
                     val list = mutableListOf<ProviderSettings>()
                     for (i in 0 until array.length()) {
                         val obj = array.getJSONObject(i)
+                        val id = obj.getString("id")
+                        val encryptedKey = obj.optString("apiKey", "")
+                        val decryptedKey = if (encryptedKey.isNotBlank()) keyStoreManager.decrypt(encryptedKey).ifBlank { encryptedKey } else ""
                         list.add(
                             ProviderSettings(
-                                id = obj.getString("id"),
+                                id = id,
                                 name = obj.getString("name"),
                                 baseUrl = obj.getString("baseUrl"),
-                                apiKey = obj.optString("apiKey", ""),
+                                apiKey = decryptedKey,
                                 defaultModel = obj.optString("defaultModel", "default-model"),
                                 isActive = false
                             )
@@ -106,11 +113,12 @@ class ProviderConfigurationManager(private val context: Context) {
 
             val newArray = JSONArray()
             currentList.forEach { p ->
+                val encryptedKey = if (p.apiKey.isNotBlank()) keyStoreManager.encrypt(p.apiKey) else ""
                 newArray.put(JSONObject().apply {
                     put("id", p.id)
                     put("name", p.name)
                     put("baseUrl", p.baseUrl)
-                    put("apiKey", p.apiKey)
+                    put("apiKey", encryptedKey)
                     put("defaultModel", p.defaultModel)
                 })
             }

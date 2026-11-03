@@ -25,3 +25,5 @@ dependencyResolutionManagement {
 rootProject.name = "Apex Agentic Master Chat"
 
 include(":app")
+include(":core-engine")
+include(":security-interface")
