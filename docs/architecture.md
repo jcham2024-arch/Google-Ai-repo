@@ -10,6 +10,10 @@ Apex Agentic Master Chat is built using strict Object-Oriented Programming princ
 
 ### 1. `:core-engine` (Java 11 Library)
 - **Zero third-party runtime dependencies**: Pure Java 11.
+- **Provider Architecture** (`com.apex.core.provider`):
+  - `ProviderConfig`: Immutable model for AI backends (`id`, `name`, `baseUrl`, `apiKey`, `defaultModel`, `active`).
+  - `ProviderRegistry`: Central registry holding active providers and dynamically injecting them into orchestrators with listener callbacks.
+  - `ProviderConfigurationManager`: Pure Java manager that persists multiple provider configurations via `StoragePort` and `MiniJson`.
 - **Nine Port Interfaces** (`com.apex.core.port`):
   - `ChatModelPort`: LLM chat and streaming generation.
   - `PlannerPort`: Planning and dynamic replanning.
@@ -32,10 +36,13 @@ Apex Agentic Master Chat is built using strict Object-Oriented Programming princ
 - **Audit Port Implementation** (`com.apex.security.audit.AuditLogManager`): Tamper-evident SHA-256 hash-chain verification (`entryHash = SHA-256(timestamp + toolName + riskLevel + decision + argsHash + previousHash)`).
 
 ### 3. `:app` (Android Application)
+- **DataStore Storage Adapter** (`com.example.data.provider.DataStoreStorageAdapter`):
+  - Implements the `:core-engine` `StoragePort` using Android Jetpack DataStore Preferences.
 - **DataStore + Android Keystore** (`com.example.data.provider`):
   - `AndroidKeyStoreManager`: Hardware-backed AES-256 GCM encryption for API keys.
   - `ProviderConfigurationManager`: DataStore Preferences for provider settings.
   - `ProviderPresets`: Full preset catalogue including OpenAI, OpenRouter, Groq, DeepSeek, Gemini (OpenAI-compatible), NVIDIA NIM, Ollama, LM Studio, and Custom.
   - Connection testing via `/models` with fallback to ping `/chat/completions`.
-- **Dynamic Ingestion** (`com.example.domain.engine`): `ProviderRegistry` and `NarratorOrchestrator` dynamically inject active provider configurations.
+- **Dynamic Ingestion** (`com.example.domain.engine`): `ProviderRegistry` and `NarratorOrchestrator` dynamically inject active provider configurations into the runtime chat engine.
 - **UI & Presentation** (`com.example.ui`): Compose navigation (`ui/chat`, `ui/settings`, `ui/agents`, `ui/workspace`, `ui/navigation`).
+  - **API Key Management**: Dedicated "Add / Change API Key" button and modal on every provider card in the Settings screen with in-place testing and Keystore encryption.

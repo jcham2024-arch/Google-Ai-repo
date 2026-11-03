@@ -18,19 +18,43 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 
+/**
+ * Universal OpenAI-compatible LLM HTTP client implementing {@link ChatModelPort}.
+ * <p>
+ * Architectural Constraints:
+ * <ul>
+ *   <li>Runs in pure Java 11 with zero external libraries (no OkHttp, Retrofit, or Gson).</li>
+ *   <li>Communicates via standard {@link HttpURLConnection}.</li>
+ *   <li>Serializes and parses JSON payloads using hand-rolled {@link MiniJson}.</li>
+ *   <li>Supports arbitrary OpenAI-compatible endpoints (OpenAI, OpenRouter, Groq, DeepSeek,
+ *       Gemini OpenAI-compatible gateway, NVIDIA NIM, and local Ollama/LM Studio).</li>
+ * </ul>
+ */
 public class OpenAiCompatibleClient implements ChatModelPort {
     private final String baseUrl;
     private final String apiKey;
     private final String defaultModel;
 
+    /**
+     * Constructs a client configured for a specific provider endpoint.
+     *
+     * @param baseUrl      target API root URL (e.g. {@code "https://openrouter.ai/api/v1"}).
+     * @param apiKey       bearer authentication token, or blank if unauthenticated/local.
+     * @param defaultModel fallback model name if unspecified in requests.
+     */
     public OpenAiCompatibleClient(String baseUrl, String apiKey, String defaultModel) {
         this.baseUrl = baseUrl != null ? baseUrl.trim().replaceAll("/+$", "") : "";
         this.apiKey = apiKey != null ? apiKey.trim() : "";
         this.defaultModel = defaultModel != null ? defaultModel.trim() : "default-model";
     }
 
+    /**
+     * Executes a synchronous completion turn against the target OpenAI-compatible endpoint.
+     *
+     * @param request the chat parameters including prompt, system prompt, and model.
+     * @return a {@link ChatResponse} containing generated content or error details.
+     */
     @Override
     public ChatResponse generate(ChatRequest request) {
         String endpoint = baseUrl.endsWith("/chat/completions") ? baseUrl : baseUrl + "/chat/completions";
@@ -104,6 +128,12 @@ public class OpenAiCompatibleClient implements ChatModelPort {
         }
     }
 
+    /**
+     * Streams completion chunks as a string iterator.
+     *
+     * @param request the chat prompt and model instructions.
+     * @return iterator yielding completion text increments.
+     */
     @Override
     public Iterator<String> stream(ChatRequest request) {
         ChatResponse resp = generate(request);

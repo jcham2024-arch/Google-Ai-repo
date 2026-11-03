@@ -9,8 +9,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,7 +38,7 @@ fun SettingsScreen() {
     var activeProvider by remember { mutableStateOf<ProviderSettings?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
 
-    // Dialog state
+    // Dialog state for adding provider
     var selectedPresetName by remember { mutableStateOf("Custom") }
     var nameInput by remember { mutableStateOf("") }
     var baseUrlInput by remember { mutableStateOf("https://api.openai.com/v1") }
@@ -43,6 +46,13 @@ fun SettingsScreen() {
     var modelInput by remember { mutableStateOf("gpt-4o") }
     var testResult by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
+
+    // Dialog state for editing/changing API key specifically
+    var providerToEditKey by remember { mutableStateOf<ProviderSettings?>(null) }
+    var editKeyInput by remember { mutableStateOf("") }
+    var showKeyVisibility by remember { mutableStateOf(false) }
+    var keyTestResult by remember { mutableStateOf<String?>(null) }
+    var isKeyTesting by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         configManager.providersFlow.collect { list ->
@@ -155,11 +165,36 @@ fun SettingsScreen() {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "Base URL: ${provider.baseUrl}", style = MaterialTheme.typography.bodySmall)
                             Text(text = "Default Model: ${provider.defaultModel}", style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                text = if (provider.apiKey.isNotBlank()) "API Key: •••••••••••• (Stored)" else "API Key: None (Public/Local or Env)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline
-                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // API Key Status Row with prominent Add / Change Key Action
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (provider.apiKey.isNotBlank()) "Key: •••••••••••• (Encrypted)" else "Key: Not Set",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (provider.apiKey.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                )
+
+                                FilledTonalButton(
+                                    onClick = {
+                                        providerToEditKey = provider
+                                        editKeyInput = provider.apiKey
+                                        showKeyVisibility = false
+                                        keyTestResult = null
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (provider.apiKey.isBlank()) "Add API Key" else "Change API Key", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
                         }
                     }
                 }
@@ -167,6 +202,7 @@ fun SettingsScreen() {
         }
     }
 
+    // Dialog for Adding Provider
     if (showAddDialog) {
         AlertDialog(
             onDismissRequest = { showAddDialog = false },
@@ -295,6 +331,113 @@ fun SettingsScreen() {
             },
             dismissButton = {
                 TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Dedicated Dialog for Adding/Changing API Key
+    providerToEditKey?.let { targetProvider ->
+        AlertDialog(
+            onDismissRequest = { providerToEditKey = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("API Key: ${targetProvider.name}")
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Enter or change the API Key for ${targetProvider.name}. The key is encrypted using hardware-backed AES-256 GCM in Android Keystore.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+
+                    OutlinedTextField(
+                        value = editKeyInput,
+                        onValueChange = {
+                            editKeyInput = it
+                            keyTestResult = null
+                        },
+                        label = { Text("API Key") },
+                        placeholder = { Text("sk-...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = if (showKeyVisibility) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showKeyVisibility = !showKeyVisibility }) {
+                                Icon(
+                                    if (showKeyVisibility) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showKeyVisibility) "Hide Key" else "Show Key"
+                                )
+                            }
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                isKeyTesting = true
+                                keyTestResult = null
+                                coroutineScope.launch {
+                                    val result = configManager.testConnection(
+                                        baseUrl = targetProvider.baseUrl,
+                                        apiKey = editKeyInput.trim(),
+                                        model = targetProvider.defaultModel
+                                    )
+                                    isKeyTesting = false
+                                    keyTestResult = if (result.isSuccess) {
+                                        "✓ " + result.getOrNull()
+                                    } else {
+                                        "✗ " + (result.exceptionOrNull()?.message ?: "Test failed")
+                                    }
+                                }
+                            },
+                            enabled = !isKeyTesting && editKeyInput.isNotBlank()
+                        ) {
+                            Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (isKeyTesting) "Verifying..." else "Test Key")
+                        }
+
+                        if (editKeyInput.isNotEmpty()) {
+                            TextButton(onClick = { editKeyInput = "" }) {
+                                Text("Clear")
+                            }
+                        }
+                    }
+
+                    keyTestResult?.let { msg ->
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    coroutineScope.launch {
+                        configManager.updateApiKey(targetProvider.id, editKeyInput.trim())
+                        providerToEditKey = null
+                    }
+                }) {
+                    Text("Save Key")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { providerToEditKey = null }) {
                     Text("Cancel")
                 }
             }

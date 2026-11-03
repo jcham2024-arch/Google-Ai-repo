@@ -5,13 +5,34 @@ import com.example.domain.gateway.AIResponse
 import com.example.domain.gateway.UniversalAIGatewayImpl
 import kotlinx.coroutines.flow.StateFlow
 
+/**
+ * Master Narrator orchestrator coordinating agent turns, dynamic model resolution, and file governance.
+ *
+ * Responsibilities:
+ * <ul>
+ *   <li>Dynamically observes active provider settings injected by [ProviderRegistry].</li>
+ *   <li>Dispatches chat turns to [UniversalAIGatewayImpl] using the active provider's base URL and credentials.</li>
+ *   <li>Enforces file governance: exclusively authorized to write files or apply approved self-improvements.</li>
+ * </ul>
+ */
 class NarratorOrchestrator(
     val providerRegistry: ProviderRegistry,
     private val gateway: UniversalAIGatewayImpl,
     private val governanceEngine: FileGovernanceEngine
 ) {
+    /** Hot reactive stream of the active AI provider settings. */
     val activeProvider: StateFlow<ProviderSettings?> = providerRegistry.activeProvider
 
+    /**
+     * Executes a single agentic chat turn through the active or specified AI model.
+     *
+     * @param prompt the user prompt or agent instruction text.
+     * @param systemInstruction system persona instructions guiding model responses.
+     * @param modelOverride optional model identifier override; falls back to active provider default.
+     * @param enableSearchGrounding whether Google Search grounding should be engaged (Gemini models).
+     * @param allowSelfEditing whether self-improvement code modification proposals are permitted.
+     * @return [AIResponse] containing generated text, provider metadata, and proposed code diffs.
+     */
     suspend fun orchestrateTurn(
         prompt: String,
         systemInstruction: String,
@@ -48,10 +69,16 @@ class NarratorOrchestrator(
         return response
     }
 
+    /**
+     * Reconfigures the active provider by ID, dynamically refreshing the active model for future turns.
+     */
     suspend fun switchProvider(providerId: String) {
         providerRegistry.selectActiveProvider(providerId)
     }
 
+    /**
+     * Saves or updates a provider's configuration.
+     */
     suspend fun updateProviderSettings(settings: ProviderSettings) {
         providerRegistry.registerOrUpdateProvider(settings)
     }

@@ -9,6 +9,18 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/**
+ * Manages hardware-backed cryptographic operations using the Android Keystore system.
+ *
+ * Security Invariants:
+ * - Encryption algorithm: AES-256 in Galois/Counter Mode (GCM) with no padding (`AES/GCM/NoPadding`).
+ * - Authentication tag: 128-bit authentication tag ensuring ciphertext integrity.
+ * - Key storage: Private AES master key is generated and stored exclusively within the device's
+ *   hardware-backed Secure Element (SE) or Trusted Execution Environment (TEE).
+ * - Key export: The raw key material can never be extracted or exported from the Keystore.
+ * - Ciphertext format: Prepends a unique 12-byte initialization vector (IV) to the ciphertext,
+ *   encoded as a Base64 string for safe persistence.
+ */
 class AndroidKeyStoreManager {
     private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     private val keyAlias = "ApexProviderKeyStoreAlias"
@@ -17,6 +29,10 @@ class AndroidKeyStoreManager {
         getOrCreateSecretKey()
     }
 
+    /**
+     * Retrieves the existing master key entry from Android Keystore, or generates a new 256-bit AES
+     * key inside hardware storage if none exists.
+     */
     private fun getOrCreateSecretKey(): SecretKey {
         if (!keyStore.containsAlias(keyAlias)) {
             val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
@@ -35,6 +51,12 @@ class AndroidKeyStoreManager {
         return entry.secretKey
     }
 
+    /**
+     * Encrypts plain text API credentials using AES-GCM.
+     *
+     * @param plainText cleartext API key or credential string.
+     * @return Base64-encoded string containing the 12-byte IV followed by the encrypted ciphertext.
+     */
     fun encrypt(plainText: String): String {
         if (plainText.isEmpty()) return ""
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -47,6 +69,12 @@ class AndroidKeyStoreManager {
         return Base64.encodeToString(combined, Base64.NO_WRAP)
     }
 
+    /**
+     * Decrypts a Base64-encoded AES-GCM ciphertext payload.
+     *
+     * @param cipherText Base64 string containing the 12-byte IV and encrypted ciphertext.
+     * @return cleartext string, or empty string if decryption fails or authentication tag is invalid.
+     */
     fun decrypt(cipherText: String): String {
         if (cipherText.isEmpty()) return ""
         try {

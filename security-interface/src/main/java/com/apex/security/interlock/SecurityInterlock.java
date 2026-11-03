@@ -14,12 +14,32 @@ import com.apex.security.policy.ToolRiskRegistry;
 
 import java.util.Optional;
 
+/**
+ * Enforced security interlock boundary implementing {@link ToolExecutorPort}.
+ * <p>
+ * This class coordinates the safety pipeline for all agentic tool invocations:
+ * <ol>
+ *   <li>Evaluates the tool's classified {@link RiskLevel} against {@link ToolRiskRegistry}.</li>
+ *   <li>If {@code riskLevel >= L3}, suspends execution and queries {@link ApprovalPort} for user consent.</li>
+ *   <li>If denied by the user, aborts execution and logs a {@code DENIED} entry into {@link AuditLogManager}.</li>
+ *   <li>If approved (or if {@code riskLevel < L3}), dispatches execution to {@link ToolRegistry} and records {@code EXECUTED_OK}.</li>
+ *   <li>Cryptographically binds every event into an append-only SHA-256 hash chain.</li>
+ * </ol>
+ */
 public class SecurityInterlock implements ToolExecutorPort {
     private final ToolRegistry toolRegistry;
     private final ToolRiskRegistry riskRegistry;
     private final AuditLogManager auditLogManager;
     private final ApprovalPort approvalPort;
 
+    /**
+     * Constructs a {@code SecurityInterlock} instance.
+     *
+     * @param toolRegistry     underlying registry of executable tool workers.
+     * @param riskRegistry     policy registry classifying tool risk levels.
+     * @param auditLogManager  tamper-evident cryptographic audit manager.
+     * @param approvalPort     UI callback gate for human authorization prompts.
+     */
     public SecurityInterlock(ToolRegistry toolRegistry, ToolRiskRegistry riskRegistry,
                              AuditLogManager auditLogManager, ApprovalPort approvalPort) {
         this.toolRegistry = toolRegistry;
@@ -28,6 +48,12 @@ public class SecurityInterlock implements ToolExecutorPort {
         this.approvalPort = approvalPort;
     }
 
+    /**
+     * Evaluates and executes a tool call subject to risk classification and human approval.
+     *
+     * @param toolCall target tool identifier and parameter map.
+     * @return an {@link ExecutionResult} denoting output text or structured denial error.
+     */
     @Override
     public ExecutionResult execute(ToolCall toolCall) {
         String toolName = toolCall.getToolName();
@@ -72,10 +98,16 @@ public class SecurityInterlock implements ToolExecutorPort {
         }
     }
 
+    /**
+     * Returns the active audit manager holding the tamper-evident log.
+     */
     public AuditLogManager getAuditLogManager() {
         return auditLogManager;
     }
 
+    /**
+     * Returns the tool risk policy registry.
+     */
     public ToolRiskRegistry getRiskRegistry() {
         return riskRegistry;
     }
