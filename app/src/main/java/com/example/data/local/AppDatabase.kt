@@ -46,6 +46,12 @@ interface ApexDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertProvider(provider: ProviderConfig)
+
+    @Query("SELECT * FROM agent_cards WHERE isNarrator = 1 LIMIT 1")
+    fun getNarratorAgent(): Flow<AgentCard?>
+
+    @Query("UPDATE agent_cards SET preferredProvider = :provider, preferredModel = :model, systemPrompt = :systemPrompt WHERE isNarrator = 1")
+    suspend fun updateNarratorSettings(provider: String, model: String, systemPrompt: String)
 }
 
 @Database(entities = [AgentCard::class, ChatMessage::class, WorkspaceFile::class, Lorebook::class, ProviderConfig::class], version = 2, exportSchema = false)

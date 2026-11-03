@@ -1,40 +1,81 @@
-# Implementation Plan - Apex Agentic Master Chat
+# Implementation Plan: Full Multi-Module Architecture & Harvest Integration
 
-Apex Agentic Master Chat is a production-grade, highly secure, standalone Android application in Kotlin built with Jetpack Compose and Material 3. It provides an advanced offline-first AI chat and agent orchestration platform with Perchance integration, web search grounding, self-improvement capabilities, and granular permission controls.
-
----
-
-## Core Requirements & Architecture
-
-1. **App Naming & Identity:**
-   - App Name: **Apex Agentic Master Chat** (updated in `metadata.json`, `strings.xml`, and `settings.gradle.kts`).
-2. **Perchance Generator WebView Wrapper:**
-   - Native GUI tab hosting the Perchance AI Chat Generator to create specialized agent cards, lorebooks, and resources directly inside the app.
-3. **Web Search Grounding:**
-   - Integrated Google Search grounding via `gemini-3.8-flash` to provide up-to-date and accurate information during agent chat orchestration.
-4. **Granular Permissions & Self-Improvement Governance:**
-   - **File Creation:** Enabled by default.
-   - **Self-Editing / Code Modification:** Disabled by default. Enabled per chat message/task as needed, requiring mandatory user review and explicit approval via an in-app diff/approval modal before any code edit is applied.
-5. **Multi-Provider AI Gateway & MCP Tools:**
-   - OpenAI-compatible multi-provider routing (Gemini default, OpenRouter, Groq, NVIDIA NIM, local) and Model Context Protocol (MCP) tool support.
+This plan implements the multi-module Java-native and Android architecture specified in `PROJECT_AGENT_INSTRUCTIONS.md` and the supplementary harvesting guidelines from `ApexAgentManagementChat`.
 
 ---
 
-## Phased Implementation Roadmap
+## 1. Architectural Blueprint & Module Hierarchy
 
-### Phase 1: Foundation, App Renaming & Perchance WebView GUI
-- Update `metadata.json`, `strings.xml`, and `settings.gradle.kts` to **Apex Agentic Master Chat**.
-- Implement `PerchanceBrowserScreen` (WebView wrapper with full navigation controls, file uploads, and JS execution).
-- Implement main bottom navigation / navigation rail framework.
+A clean three-layer architecture with strictly one-way dependencies:
+```
+:app  →  :security-interface  →  :core-engine
+```
 
-### Phase 2: Web Search Grounding & Multi-Provider AI Gateway
-- Implement `GeminiGatewayImpl` configured with Google Search grounding tool (`gemini-3.8-flash`).
-- Set up EncryptedSharedPreferences for API keys and provider configurations.
+### Module Breakdown:
+1. **`:core-engine`** (`java-library`, Java 11):
+   - **Zero external dependencies** (runtime classpath contains only `java.base`).
+   - Pure Java implementation of the **Nine Port Interfaces** (`ChatModelPort`, `PlannerPort`, `ToolExecutorPort`, `ApprovalPort`, `StoragePort`, `VectorStorePort`, `SecretsPort`, `AuditPort`, `TelemetryPort`).
+   - Supporting model types converted from Java 21 records to Java 11 `final` classes.
+   - In-process `ToolWorker` interface (replacing desktop `ProcessBuilder`).
+   - Lightweight `OpenAiCompatibleClient` using `HttpURLConnection` and hand-rolled JSON parsing.
 
-### Phase 3: Agent Swarm, File Creation & Self-Editing Review Sandbox
-- Build agent card registry and task orchestration.
-- Implement `FileGovernanceEngine` with file creation support (default ON) and self-editing code modification sandbox requiring explicit per-message user review and approval before writing files.
+2. **`:security-interface`** (`com.android.library`):
+   - Approval-interlock boundary gating every tool call.
+   - `RiskLevel` enum (`L0`, `L1`, `L2`, `L3`, `L4`) with default risk categorization and L3 fallback for unknown tools.
+   - `ToolRiskRegistry` mapping tools to risk policies.
+   - SHA-256 hash-chained append-only `AuditLog` implementation of `AuditPort`.
+   - Interlock Relay SPI surface exposed to `:app`.
 
-### Phase 4: Persistence, Firebase Cloud Sync & Wiki Docs
-- Room database for offline-first caching and Firebase Firestore + Google Sign-In for cloud persistence.
-- Generate obsidian-style wiki documentation in `/docs/`.
+3. **`:app`** (`com.android.application`, Kotlin + Compose):
+   - Does **not** import `:core-engine` directly; communicates through `:security-interface`.
+   - **DataStore + Android Keystore**: Secure API key storage in Android Keystore under unique alias, while non-sensitive provider metadata is stored in DataStore Preferences.
+   - **Complete Provider Presets**: OpenAI, OpenRouter, Groq, DeepSeek, Gemini (OpenAI compat), NVIDIA NIM, Ollama (Local), LM Studio (Local), and Custom.
+   - **Connection Testing**: `GET {baseUrl}/models` with fallback ping to `POST /chat/completions`.
+   - **Jetpack Compose UI**: Settings provider editor, Chat screen with human-in-the-loop approval dialogs, and workspace management.
+
+---
+
+## 2. Proposed Changes & Implementation Steps
+
+### Step 1: Multi-Module Project Configuration
+- Update `/settings.gradle.kts` to include `:app`, `:core-engine`, and `:security-interface`.
+- Create `/core-engine/build.gradle.kts` with `java-library` plugin and `sourceCompatibility = JavaVersion.VERSION_11`.
+- Create `/security-interface/build.gradle.kts` with `com.android.library` plugin depending on `:core-engine`.
+- Update `/app/build.gradle.kts` to declare dependency on `project(":security-interface")` and `project(":core-engine")`.
+
+### Step 2: Implement `:core-engine` (Java 11, Pure Java)
+- Implement Nine Port Interfaces in package `com.apex.core.port`:
+  - `ChatModelPort`, `PlannerPort`, `ToolExecutorPort`, `ApprovalPort`, `StoragePort`, `VectorStorePort`, `SecretsPort`, `AuditPort`, `TelemetryPort`.
+- Implement supporting models (`ChatMessage`, `ToolCall`, `ExecutionResult`, `Plan`, etc.) as Java 11 final classes.
+- Implement in-process `ToolWorker` and `ToolRegistry`.
+- Implement `OpenAiCompatibleClient` and hand-rolled JSON parser (`MiniJson`).
+
+### Step 3: Implement `:security-interface` (Android Library)
+- Implement `RiskLevel` enum with `requiresApproval()`.
+- Implement `ToolRiskRegistry` with default risk mapping (L0–L4) and unknown tool defaults.
+- Implement `AuditEntry` and tamper-evident SHA-256 hash-chained `AuditLogManager`.
+- Implement `SecurityInterlock` gating tool execution and firing approval callbacks to the host UI.
+
+### Step 4: Implement Phase A Provider System in `:app`
+- Implement `AndroidKeyStoreManager` encrypting/decrypting API keys with hardware-backed AES keys.
+- Update `ProviderPresets` to include DeepSeek (`https://api.deepseek.com/v1`).
+- Wire `ProviderConfigurationManager` with DataStore + Keystore.
+- Enhance Settings UI with connection testing, model picker, and preset selection.
+- Connect Chat UI approval dialog to `SecurityInterlock`.
+
+### Step 5: Verification & Compilation
+- Run `compile_applet` to verify compilation across all three modules (`:core-engine`, `:security-interface`, `:app`).
+- Verify no desktop-only APIs (`Thread.ofVirtual`, `java.net.http`, `ProcessBuilder`) exist in `:core-engine`.
+- Verify `:core-engine` has no Android imports.
+- Verify `:app` does not import `com.apex.core` engine internals directly.
+
+---
+
+## 3. Definition of Done & Acceptance Criteria
+
+1. Gradle builds successfully with all three modules (`:app`, `:security-interface`, `:core-engine`).
+2. `:core-engine` compiles cleanly under Java 11 with zero third-party dependencies.
+3. Nine Port Interfaces and `RiskLevel` enum are fully functional.
+4. API keys are safely managed with Android Keystore.
+5. All provider presets (including DeepSeek) are present and editable.
+6. In-app approval flow surfaces tool execution dialogs before critical operations.
