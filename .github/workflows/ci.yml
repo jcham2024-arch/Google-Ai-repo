@@ -90,6 +90,16 @@ jobs:
           fi
           echo "PASS: Production source code uses TelemetryPort logging."
 
+      - name: "Guardrail C10: Verify Zero Perchance or Generator Remnants"
+        run: |
+          echo "Checking for legacy Perchance / Perchance Generator references in app source code..."
+          if grep -rn -i "perchance\|perchance_generator" app/src/main/; then
+            echo "ERROR: Violation of Scope Boundary - Legacy Perchance code references detected in app/src/main/!"
+            exit 1
+          fi
+          echo "PASS: Codebase is free of Perchance remnants."
+
+
       # --- Secret Scanning (C5) ---
 
       - name: "Guardrail C5: Secret Scanning"

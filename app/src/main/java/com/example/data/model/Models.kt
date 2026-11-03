@@ -18,13 +18,13 @@ data class AgentCard(
 
 @Entity(tableName = "chat_messages")
 data class ChatMessage(
-    @PrimaryKey val id: String,
-    val chatId: String,
-    val senderName: String,
+    @PrimaryKey val id: String = java.util.UUID.randomUUID().toString(),
+    val chatId: String = "default",
+    val senderName: String = "User",
     val content: String,
-    val isUser: Boolean,
-    val providerUsed: String,
-    val modelUsed: String,
+    val isUser: Boolean = true,
+    val providerUsed: String = "Apex",
+    val modelUsed: String = "Default",
     val hasSearchGrounding: Boolean = false,
     val pendingFileEdit: String? = null,
     val isFileEditApproved: Boolean = false,

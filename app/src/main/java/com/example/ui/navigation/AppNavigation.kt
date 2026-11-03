@@ -4,11 +4,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -17,13 +22,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.ui.agents.AgentListScreen
 import com.example.ui.chat.ChatScreen
-import com.example.ui.chat.PerchanceBrowserScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.workspace.WorkspaceScreen
 
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Perchance : Screen("perchance", "Perchance Hub", Icons.Default.Language)
-    object Chat : Screen("chat", "Narrator Chat", Icons.Default.Chat)
+    object Chat : Screen("chat", "Agent Chat", Icons.Default.Chat)
     object Agents : Screen("agents", "Agent Swarm", Icons.Default.SmartToy)
     object Workspace : Screen("workspace", "Workspace", Icons.Default.Code)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
@@ -34,7 +37,6 @@ sealed class Screen(val route: String, val title: String, val icon: androidx.com
 fun AppNavigation() {
     val navController = rememberNavController()
     val items = listOf(
-        Screen.Perchance,
         Screen.Chat,
         Screen.Agents,
         Screen.Workspace,
@@ -73,7 +75,6 @@ fun AppNavigation() {
             startDestination = Screen.Chat.route,
             modifier = Modifier.padding(padding)
         ) {
-            composable(Screen.Perchance.route) { PerchanceBrowserScreen() }
             composable(Screen.Chat.route) { ChatScreen() }
             composable(Screen.Agents.route) { AgentListScreen() }
             composable(Screen.Workspace.route) { WorkspaceScreen() }

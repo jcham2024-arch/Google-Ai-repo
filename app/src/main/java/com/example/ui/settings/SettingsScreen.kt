@@ -9,7 +9,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Visibility
@@ -18,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -25,17 +25,16 @@ import androidx.compose.ui.unit.dp
 import com.example.data.provider.ProviderConfigurationManager
 import com.example.data.provider.ProviderPresets
 import com.example.data.provider.ProviderSettings
-import kotlinx.coroutines.launch
+import com.example.domain.repository.SettingsRepositoryImpl
+import com.example.domain.usecase.LoadSettingsUseCase
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen() {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val configManager = remember { ProviderConfigurationManager(context) }
+fun SettingsScreen(
+    viewModel: SettingsViewModel = rememberSettingsViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
 
-    var providers by remember { mutableStateOf<List<ProviderSettings>>(emptyList()) }
-    var activeProvider by remember { mutableStateOf<ProviderSettings?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
 
     // Dialog state for adding provider
@@ -44,27 +43,11 @@ fun SettingsScreen() {
     var baseUrlInput by remember { mutableStateOf("https://api.openai.com/v1") }
     var apiKeyInput by remember { mutableStateOf("") }
     var modelInput by remember { mutableStateOf("gpt-4o") }
-    var testResult by remember { mutableStateOf<String?>(null) }
-    var isTesting by remember { mutableStateOf(false) }
 
-    // Dialog state for editing/changing API key specifically
+    // Dialog state for editing API key
     var providerToEditKey by remember { mutableStateOf<ProviderSettings?>(null) }
     var editKeyInput by remember { mutableStateOf("") }
     var showKeyVisibility by remember { mutableStateOf(false) }
-    var keyTestResult by remember { mutableStateOf<String?>(null) }
-    var isKeyTesting by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        configManager.providersFlow.collect { list ->
-            providers = list
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        configManager.activeProviderFlow.collect { active ->
-            activeProvider = active
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -79,7 +62,7 @@ fun SettingsScreen() {
                 baseUrlInput = "https://api.openai.com/v1"
                 apiKeyInput = ""
                 modelInput = "gpt-4o"
-                testResult = null
+                viewModel.clearTestResult()
                 showAddDialog = true
             }) {
                 Icon(Icons.Default.Add, contentDescription = "Add Provider")
@@ -101,12 +84,12 @@ fun SettingsScreen() {
                     Text(text = "Active Narrator Provider", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "${activeProvider?.name ?: "None"} (${activeProvider?.defaultModel ?: "Default"})",
+                        text = "${uiState.activeProvider?.name ?: "None"} (${uiState.activeProvider?.defaultModel ?: "Default"})",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Base URL: ${activeProvider?.baseUrl ?: "Not set"}",
+                        text = "Base URL: ${uiState.activeProvider?.baseUrl ?: "Not set"}",
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -118,7 +101,7 @@ fun SettingsScreen() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.weight(1f)
             ) {
-                items(providers) { provider ->
+                items(uiState.providers) { provider ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = if (provider.isActive) {
@@ -146,17 +129,13 @@ fun SettingsScreen() {
                                 Row {
                                     if (!provider.isActive) {
                                         TextButton(onClick = {
-                                            coroutineScope.launch {
-                                                configManager.setActiveProvider(provider.id)
-                                            }
+                                            viewModel.selectActiveProvider(provider.id)
                                         }) {
                                             Text("Set Active")
                                         }
                                     }
                                     IconButton(onClick = {
-                                        coroutineScope.launch {
-                                            configManager.deleteProvider(provider.id)
-                                        }
+                                        viewModel.deleteProvider(provider.id)
                                     }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Delete Provider", tint = MaterialTheme.colorScheme.error)
                                     }
@@ -168,7 +147,6 @@ fun SettingsScreen() {
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // API Key Status Row with prominent Add / Change Key Action
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -185,7 +163,7 @@ fun SettingsScreen() {
                                         providerToEditKey = provider
                                         editKeyInput = provider.apiKey
                                         showKeyVisibility = false
-                                        keyTestResult = null
+                                        viewModel.clearTestResult()
                                     },
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                     modifier = Modifier.height(32.dp)
@@ -225,7 +203,7 @@ fun SettingsScreen() {
                                     nameInput = preset.name
                                     baseUrlInput = preset.baseUrl
                                     modelInput = preset.defaultModel
-                                    testResult = null
+                                    viewModel.clearTestResult()
                                 },
                                 label = { Text(preset.name, style = MaterialTheme.typography.labelSmall) }
                             )
@@ -266,7 +244,6 @@ fun SettingsScreen() {
                         singleLine = true
                     )
 
-                    // Test Connection Button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -274,35 +251,25 @@ fun SettingsScreen() {
                     ) {
                         OutlinedButton(
                             onClick = {
-                                isTesting = true
-                                testResult = null
-                                coroutineScope.launch {
-                                    val result = configManager.testConnection(
-                                        baseUrl = baseUrlInput.trim(),
-                                        apiKey = apiKeyInput.trim(),
-                                        model = modelInput.trim()
-                                    )
-                                    isTesting = false
-                                    testResult = if (result.isSuccess) {
-                                        "✓ " + result.getOrNull()
-                                    } else {
-                                        "✗ " + (result.exceptionOrNull()?.message ?: "Connection failed")
-                                    }
-                                }
+                                viewModel.testConnection(
+                                    baseUrl = baseUrlInput.trim(),
+                                    apiKey = apiKeyInput.trim(),
+                                    model = modelInput.trim()
+                                )
                             },
-                            enabled = !isTesting && baseUrlInput.isNotBlank()
+                            enabled = !uiState.isTestingConnection && baseUrlInput.isNotBlank()
                         ) {
                             Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(if (isTesting) "Testing..." else "Test Connection")
+                            Text(if (uiState.isTestingConnection) "Testing..." else "Test Connection")
                         }
                     }
 
-                    testResult?.let { msg ->
+                    uiState.testConnectionResult?.let { msg ->
                         Text(
                             text = msg,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            color = if (msg.contains("Successful")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                         )
                     }
                 }
@@ -310,20 +277,18 @@ fun SettingsScreen() {
             confirmButton = {
                 Button(onClick = {
                     if (nameInput.isNotBlank() && baseUrlInput.isNotBlank()) {
-                        coroutineScope.launch {
-                            val newId = nameInput.lowercase().replace(" ", "_").replace(Regex("[^a-z0-9_]"), "") + "_" + System.currentTimeMillis()
-                            configManager.saveProvider(
-                                ProviderSettings(
-                                    id = newId,
-                                    name = nameInput.trim(),
-                                    baseUrl = baseUrlInput.trim(),
-                                    apiKey = apiKeyInput.trim(),
-                                    defaultModel = modelInput.trim(),
-                                    isActive = false
-                                )
+                        val newId = nameInput.lowercase().replace(" ", "_").replace(Regex("[^a-z0-9_]"), "") + "_" + System.currentTimeMillis()
+                        viewModel.saveProvider(
+                            ProviderSettings(
+                                id = newId,
+                                name = nameInput.trim(),
+                                baseUrl = baseUrlInput.trim(),
+                                apiKey = apiKeyInput.trim(),
+                                defaultModel = modelInput.trim(),
+                                isActive = false
                             )
-                            showAddDialog = false
-                        }
+                        )
+                        showAddDialog = false
                     }
                 }) {
                     Text("Save Provider")
@@ -337,7 +302,7 @@ fun SettingsScreen() {
         )
     }
 
-    // Dedicated Dialog for Adding/Changing API Key
+    // Dedicated Dialog for API Key
     providerToEditKey?.let { targetProvider ->
         AlertDialog(
             onDismissRequest = { providerToEditKey = null },
@@ -354,17 +319,14 @@ fun SettingsScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Enter or change the API Key for ${targetProvider.name}. The key is encrypted using hardware-backed AES-256 GCM in Android Keystore.",
+                        text = "Enter or change the API Key for ${targetProvider.name}. Key is encrypted via Android Keystore.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline
                     )
 
                     OutlinedTextField(
                         value = editKeyInput,
-                        onValueChange = {
-                            editKeyInput = it
-                            keyTestResult = null
-                        },
+                        onValueChange = { editKeyInput = it },
                         label = { Text("API Key") },
                         placeholder = { Text("sk-...") },
                         modifier = Modifier.fillMaxWidth(),
@@ -387,27 +349,17 @@ fun SettingsScreen() {
                     ) {
                         OutlinedButton(
                             onClick = {
-                                isKeyTesting = true
-                                keyTestResult = null
-                                coroutineScope.launch {
-                                    val result = configManager.testConnection(
-                                        baseUrl = targetProvider.baseUrl,
-                                        apiKey = editKeyInput.trim(),
-                                        model = targetProvider.defaultModel
-                                    )
-                                    isKeyTesting = false
-                                    keyTestResult = if (result.isSuccess) {
-                                        "✓ " + result.getOrNull()
-                                    } else {
-                                        "✗ " + (result.exceptionOrNull()?.message ?: "Test failed")
-                                    }
-                                }
+                                viewModel.testConnection(
+                                    baseUrl = targetProvider.baseUrl,
+                                    apiKey = editKeyInput.trim(),
+                                    model = targetProvider.defaultModel
+                                )
                             },
-                            enabled = !isKeyTesting && editKeyInput.isNotBlank()
+                            enabled = !uiState.isTestingConnection && editKeyInput.isNotBlank()
                         ) {
                             Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (isKeyTesting) "Verifying..." else "Test Key")
+                            Text(if (uiState.isTestingConnection) "Verifying..." else "Test Key")
                         }
 
                         if (editKeyInput.isNotEmpty()) {
@@ -417,21 +369,19 @@ fun SettingsScreen() {
                         }
                     }
 
-                    keyTestResult?.let { msg ->
+                    uiState.testConnectionResult?.let { msg ->
                         Text(
                             text = msg,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            color = if (msg.contains("Successful")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                         )
                     }
                 }
             },
             confirmButton = {
                 Button(onClick = {
-                    coroutineScope.launch {
-                        configManager.updateApiKey(targetProvider.id, editKeyInput.trim())
-                        providerToEditKey = null
-                    }
+                    viewModel.saveProvider(targetProvider.copy(apiKey = editKeyInput.trim()))
+                    providerToEditKey = null
                 }) {
                     Text("Save Key")
                 }
@@ -442,5 +392,16 @@ fun SettingsScreen() {
                 }
             }
         )
+    }
+}
+
+@Composable
+fun rememberSettingsViewModel(): SettingsViewModel {
+    val context = LocalContext.current
+    return remember {
+        val configManager = ProviderConfigurationManager(context)
+        val repo = SettingsRepositoryImpl(configManager)
+        val useCase = LoadSettingsUseCase(repo)
+        SettingsViewModel(repo, useCase)
     }
 }
