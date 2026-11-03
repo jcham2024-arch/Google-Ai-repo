@@ -1,6 +1,7 @@
 package com.apex.security.audit;
 
 import com.apex.core.port.AuditPort;
+import com.apex.core.port.AuditStorePort;
 import com.apex.core.port.model.AuditRecord;
 
 import java.nio.charset.StandardCharsets;
@@ -10,14 +11,38 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * Audit log manager implementing {@link AuditPort} and delegating persistence to an {@link AuditStorePort}.
+ */
 public class AuditLogManager implements AuditPort {
-    private final List<AuditRecord> trail = new ArrayList<>();
-    private String lastHash = "0000000000000000000000000000000000000000000000000000000000000000";
+    public static final String GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    private final AuditStorePort store;
+    private final List<AuditRecord> inMemoryFallback = new ArrayList<>();
+    private String lastHash = GENESIS_HASH;
+
+    public AuditLogManager() {
+        this(null);
+    }
+
+    public AuditLogManager(AuditStorePort store) {
+        this.store = store;
+        if (store != null) {
+            List<AuditRecord> existing = store.readAll();
+            if (!existing.isEmpty()) {
+                this.lastHash = existing.get(existing.size() - 1).getEntryHash();
+            }
+        }
+    }
 
     @Override
     public synchronized void append(AuditRecord record) {
         if (record != null) {
-            trail.add(record);
+            if (store != null) {
+                store.append(record);
+            } else {
+                inMemoryFallback.add(record);
+            }
             lastHash = record.getEntryHash();
         }
     }
@@ -43,13 +68,19 @@ public class AuditLogManager implements AuditPort {
 
     @Override
     public synchronized List<AuditRecord> getTrail() {
-        return Collections.unmodifiableList(new ArrayList<>(trail));
+        if (store != null) {
+            return store.readAll();
+        }
+        return Collections.unmodifiableList(new ArrayList<>(inMemoryFallback));
     }
 
     @Override
     public synchronized boolean verifyChain() {
-        String expectedPrev = "0000000000000000000000000000000000000000000000000000000000000000";
-        for (AuditRecord record : trail) {
+        if (store != null) {
+            return store.verify() == null;
+        }
+        String expectedPrev = GENESIS_HASH;
+        for (AuditRecord record : inMemoryFallback) {
             if (!record.getPreviousHash().equals(expectedPrev)) {
                 return false;
             }

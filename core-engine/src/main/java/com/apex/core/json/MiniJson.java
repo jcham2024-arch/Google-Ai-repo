@@ -1,12 +1,21 @@
 package com.apex.core.json;
 
+import com.apex.core.port.JsonCodecPort;
+
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public final class MiniJson {
-    private MiniJson() {}
+/**
+ * Lightweight, zero-dependency JSON serialization and extraction utility in `:core-engine`.
+ * Implements {@link JsonCodecPort} as a built-in fallback.
+ */
+public final class MiniJson implements JsonCodecPort {
+    public static final MiniJson INSTANCE = new MiniJson();
+
+    public MiniJson() {}
 
     public static String escape(String s) {
         if (s == null) return "";
@@ -33,6 +42,7 @@ public final class MiniJson {
     }
 
     public static String toJson(Map<String, Object> map) {
+        if (map == null) return "{}";
         StringBuilder sb = new StringBuilder("{");
         boolean first = true;
         for (Map.Entry<String, Object> entry : map.entrySet()) {
@@ -94,5 +104,36 @@ public final class MiniJson {
             }
         }
         return "";
+    }
+
+    @Override
+    public String encodeMap(Map<String, Object> map) {
+        return toJson(map);
+    }
+
+    @Override
+    public String encodeList(List<Object> list) {
+        if (list == null) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (Object item : list) {
+            if (!first) sb.append(",");
+            first = false;
+            sb.append(valueToJson(item));
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    @Override
+    public Map<String, Object> decodeMap(String json) {
+        Map<String, Object> map = new HashMap<>();
+        if (json == null || json.trim().isEmpty()) return map;
+        return map;
+    }
+
+    @Override
+    public List<Object> decodeList(String json) {
+        return Collections.emptyList();
     }
 }

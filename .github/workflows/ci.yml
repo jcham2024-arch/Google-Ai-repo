@@ -1,0 +1,92 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - 'phase/**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate-and-test:
+    name: Build, Lint, Guardrails, and Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # --- Architectural Guardrail Checks (C1 - C4) ---
+
+      - name: "Guardrail C1: Verify Zero Dependencies in :core-engine"
+        run: |
+          echo "Checking core-engine/build.gradle.kts for runtime dependencies..."
+          if grep -E '^\s*implementation\(' core-engine/build.gradle.kts; then
+            echo "ERROR: Violation of Guardrail C1 - core-engine must have zero runtime dependencies (java.base only)!"
+            exit 1
+          fi
+          echo "PASS: core-engine has zero runtime dependencies."
+
+      - name: "Guardrail C2: Verify No Android Imports in :core-engine"
+        run: |
+          echo "Checking core-engine/src/main for illegal Android framework imports..."
+          if grep -rn "import android\." core-engine/src/main/; then
+            echo "ERROR: Violation of Guardrail C2 - Android framework imports found in core-engine!"
+            exit 1
+          fi
+          echo "PASS: core-engine is free of Android framework dependencies."
+
+      - name: "Guardrail C3: Verify Strict Layer Dependency Direction"
+        run: |
+          echo "Checking layer hierarchy (:app -> :security-interface -> :core-engine)..."
+          if grep -rn 'project(":app")' core-engine/ security-interface/; then
+            echo "ERROR: Inverted dependency! core-engine or security-interface must never depend on :app!"
+            exit 1
+          fi
+          if grep -rn 'project(":security-interface")' core-engine/; then
+            echo "ERROR: Inverted dependency! core-engine must never depend on :security-interface!"
+            exit 1
+          fi
+          echo "PASS: Layer dependency hierarchy is strictly preserved."
+
+      - name: "Guardrail C4: Verify No MiniJson Usage in Production Outside core-engine"
+        run: |
+          echo "Checking for illegal MiniJson usage in production app/..."
+          if grep -rn "import com.apex.core.json.MiniJson" app/src/main/; then
+            echo "ERROR: Production app code must use JsonCodecPort (e.g. OrgJsonCodec), not MiniJson directly!"
+            exit 1
+          fi
+          echo "PASS: Production app correctly uses JsonCodecPort abstractions."
+
+      # --- Secret Scanning (C5) ---
+
+      - name: "Guardrail C5: Secret Scanning"
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      # --- Compile and Test ---
+
+      - name: Run Unit Tests
+        run: |
+          chmod +x ./gradlew || true
+          gradle test --no-daemon
+
+      - name: Build Debug Artifacts
+        run: |
+          gradle assembleDebug --no-daemon

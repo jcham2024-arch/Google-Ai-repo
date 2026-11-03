@@ -1,81 +1,101 @@
-# Implementation Plan: Full Multi-Module Architecture & Harvest Integration
+# Implementation Plan: Document 01 — Immediate Foundation
 
-This plan implements the multi-module Java-native and Android architecture specified in `PROJECT_AGENT_INSTRUCTIONS.md` and the supplementary harvesting guidelines from `ApexAgentManagementChat`.
+This plan implements **Document 01 (Immediate Foundation: Tests, JSON Portability, Audit Persistence, CI)** for `ApexAgentManagementChat` / `apex-android`.
 
 ---
 
-## 1. Architectural Blueprint & Module Hierarchy
+## 1. Architectural Blueprint & Target Deliverables
 
-A clean three-layer architecture with strictly one-way dependencies:
 ```
-:app  →  :security-interface  →  :core-engine
+┌────────────────────────────────────────────────────────┐
+│                         :app                           │
+│     (OrgJsonCodec Adapter • DataStore • Keystore)      │
+└───────────────────────────┬────────────────────────────┘
+                            │ depends on
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                  :security-interface                   │
+│   (FileAuditStore JSONL • SecurityInterlock Tests)     │
+└───────────────────────────┬────────────────────────────┘
+                            │ depends on
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│                      :core-engine                      │
+│   (JsonCodecPort • AuditStorePort • Pure Java 11)      │
+└────────────────────────────────────────────────────────┘
 ```
 
-### Module Breakdown:
-1. **`:core-engine`** (`java-library`, Java 11):
-   - **Zero external dependencies** (runtime classpath contains only `java.base`).
-   - Pure Java implementation of the **Nine Port Interfaces** (`ChatModelPort`, `PlannerPort`, `ToolExecutorPort`, `ApprovalPort`, `StoragePort`, `VectorStorePort`, `SecretsPort`, `AuditPort`, `TelemetryPort`).
-   - Supporting model types converted from Java 21 records to Java 11 `final` classes.
-   - In-process `ToolWorker` interface (replacing desktop `ProcessBuilder`).
-   - Lightweight `OpenAiCompatibleClient` using `HttpURLConnection` and hand-rolled JSON parsing.
+### Deliverables:
+1. **Task 1 — Testing Foundation**:
+   - Comprehensive test suite for all critical components:
+     - `SecurityInterlockTest` (risk classification L0–L4, unknown tool fail-closed to deny).
+     - `AuditLogManagerTest` (hash chain linking, middle tampering detection, empty trail).
+     - `MiniJsonTest` (characterization tests for JSON formatting and extraction).
+     - `ChatModelPortModelTest` (immutable final models invariants and edge cases).
+     - `ApprovalPortContractTest` (reusable contract test for human approval ports).
+   - Documented in `docs/testing.md`.
 
-2. **`:security-interface`** (`com.android.library`):
-   - Approval-interlock boundary gating every tool call.
-   - `RiskLevel` enum (`L0`, `L1`, `L2`, `L3`, `L4`) with default risk categorization and L3 fallback for unknown tools.
-   - `ToolRiskRegistry` mapping tools to risk policies.
-   - SHA-256 hash-chained append-only `AuditLog` implementation of `AuditPort`.
-   - Interlock Relay SPI surface exposed to `:app`.
+2. **Task 2 — JSON Portability (`JsonCodecPort`)**:
+   - Define `JsonCodecPort` in `:core-engine` as a pure Java interface.
+   - Implement `OrgJsonCodec` in `:app` using the Android SDK's built-in `org.json` library (zero extra third-party dependencies, native performance).
+   - Migrate call sites away from direct `MiniJson` usage, reserving `MiniJson` strictly as an internal fallback.
+   - Architectural Decision Record in `docs/adr/0002-json-codec.md`.
 
-3. **`:app`** (`com.android.application`, Kotlin + Compose):
-   - Does **not** import `:core-engine` directly; communicates through `:security-interface`.
-   - **DataStore + Android Keystore**: Secure API key storage in Android Keystore under unique alias, while non-sensitive provider metadata is stored in DataStore Preferences.
-   - **Complete Provider Presets**: OpenAI, OpenRouter, Groq, DeepSeek, Gemini (OpenAI compat), NVIDIA NIM, Ollama (Local), LM Studio (Local), and Custom.
-   - **Connection Testing**: `GET {baseUrl}/models` with fallback ping to `POST /chat/completions`.
-   - **Jetpack Compose UI**: Settings provider editor, Chat screen with human-in-the-loop approval dialogs, and workspace management.
+3. **Task 3 — Persistent Hash-Chained Audit Trail (`AuditStorePort` & `FileAuditStore`)**:
+   - Define `AuditStorePort` in `:core-engine`.
+   - Implement `FileAuditStore` in `:security-interface` storing newline-delimited JSON (`.jsonl`) append-only records with `FileChannel` + `StandardOpenOption.APPEND` and `force(true)`.
+   - Wire `AuditLogManager` to delegate to `AuditStorePort`.
+   - Document format and rotation in `docs/audit-format.md`.
 
----
-
-## 2. Proposed Changes & Implementation Steps
-
-### Step 1: Multi-Module Project Configuration
-- Update `/settings.gradle.kts` to include `:app`, `:core-engine`, and `:security-interface`.
-- Create `/core-engine/build.gradle.kts` with `java-library` plugin and `sourceCompatibility = JavaVersion.VERSION_11`.
-- Create `/security-interface/build.gradle.kts` with `com.android.library` plugin depending on `:core-engine`.
-- Update `/app/build.gradle.kts` to declare dependency on `project(":security-interface")` and `project(":core-engine")`.
-
-### Step 2: Implement `:core-engine` (Java 11, Pure Java)
-- Implement Nine Port Interfaces in package `com.apex.core.port`:
-  - `ChatModelPort`, `PlannerPort`, `ToolExecutorPort`, `ApprovalPort`, `StoragePort`, `VectorStorePort`, `SecretsPort`, `AuditPort`, `TelemetryPort`.
-- Implement supporting models (`ChatMessage`, `ToolCall`, `ExecutionResult`, `Plan`, etc.) as Java 11 final classes.
-- Implement in-process `ToolWorker` and `ToolRegistry`.
-- Implement `OpenAiCompatibleClient` and hand-rolled JSON parser (`MiniJson`).
-
-### Step 3: Implement `:security-interface` (Android Library)
-- Implement `RiskLevel` enum with `requiresApproval()`.
-- Implement `ToolRiskRegistry` with default risk mapping (L0–L4) and unknown tool defaults.
-- Implement `AuditEntry` and tamper-evident SHA-256 hash-chained `AuditLogManager`.
-- Implement `SecurityInterlock` gating tool execution and firing approval callbacks to the host UI.
-
-### Step 4: Implement Phase A Provider System in `:app`
-- Implement `AndroidKeyStoreManager` encrypting/decrypting API keys with hardware-backed AES keys.
-- Update `ProviderPresets` to include DeepSeek (`https://api.deepseek.com/v1`).
-- Wire `ProviderConfigurationManager` with DataStore + Keystore.
-- Enhance Settings UI with connection testing, model picker, and preset selection.
-- Connect Chat UI approval dialog to `SecurityInterlock`.
-
-### Step 5: Verification & Compilation
-- Run `compile_applet` to verify compilation across all three modules (`:core-engine`, `:security-interface`, `:app`).
-- Verify no desktop-only APIs (`Thread.ofVirtual`, `java.net.http`, `ProcessBuilder`) exist in `:core-engine`.
-- Verify `:core-engine` has no Android imports.
-- Verify `:app` does not import `com.apex.core` engine internals directly.
+4. **Task 4 — CI & Guardrails**:
+   - Create `.github/workflows/ci.yml` verifying:
+     - Unit test execution.
+     - Constraint C1 (dependency direction `:app` → `:security-interface` → `:core-engine`).
+     - Constraint C2 (no third-party runtime dependencies and no Android imports in `:core-engine`).
+     - Constraint C5 (secret hygiene scan).
+   - Document guardrails in `docs/ci.md`.
 
 ---
 
-## 3. Definition of Done & Acceptance Criteria
+## 2. Step-by-Step Execution Plan
 
-1. Gradle builds successfully with all three modules (`:app`, `:security-interface`, `:core-engine`).
-2. `:core-engine` compiles cleanly under Java 11 with zero third-party dependencies.
-3. Nine Port Interfaces and `RiskLevel` enum are fully functional.
-4. API keys are safely managed with Android Keystore.
-5. All provider presets (including DeepSeek) are present and editable.
-6. In-app approval flow surfaces tool execution dialogs before critical operations.
+### Step 1: Define Ports in `:core-engine`
+- Create `com.apex.core.port.JsonCodecPort` (lossless encode/decode for UTF-8, maps, and lists).
+- Create `com.apex.core.port.AuditStorePort` (append, readAll, verify sequence from genesis).
+
+### Step 2: Implement File-Backed Audit in `:security-interface`
+- Implement `FileAuditStore` in `com.apex.security.audit` reading and writing `.jsonl` audit files.
+- Update `AuditLogManager` to wrap and delegate to `AuditStorePort`.
+
+### Step 3: Implement JSON Adapter in `:app`
+- Implement `OrgJsonCodec` in `com.example.data.adapter` implementing `JsonCodecPort` via `org.json`.
+- Inject `JsonCodecPort` into `OpenAiCompatibleClient` and runtime callers.
+
+### Step 4: Write Complete Unit Test Suite
+- `core-engine/src/test/java/com/apex/core/json/MiniJsonTest.java`
+- `core-engine/src/test/java/com/apex/core/port/model/ChatModelPortModelTest.java`
+- `security-interface/src/test/java/com/apex/security/policy/SecurityInterlockTest.java`
+- `security-interface/src/test/java/com/apex/security/audit/AuditLogManagerTest.java`
+- `security-interface/src/test/java/com/apex/security/audit/FileAuditStoreTest.java`
+
+### Step 5: Create CI Workflow & Documentation
+- Create `.github/workflows/ci.yml`.
+- Write ADR `docs/adr/0002-json-codec.md`.
+- Write `docs/audit-format.md`.
+- Write `docs/testing.md`.
+- Write `docs/ci.md`.
+
+### Step 6: Compilation & Verification
+- Run `compile_applet` to verify compilation across `:core-engine`, `:security-interface`, and `:app`.
+
+---
+
+## 3. Definition of Done Checklist
+
+- [x] `JsonCodecPort` and `AuditStorePort` defined in `:core-engine` (Java 11, pure Java).
+- [x] `FileAuditStore` implemented in `:security-interface` using durable JSONL.
+- [x] `OrgJsonCodec` implemented in `:app` using native `org.json`.
+- [x] All 5+ test classes implemented and compiling.
+- [x] CI workflow `.github/workflows/ci.yml` in place.
+- [x] All ADRs and documentation files created.
+- [x] Full app compilation succeeds.

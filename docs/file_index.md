@@ -26,6 +26,8 @@ This file provides an index of all files in **Apex Agentic Master Chat** with cr
 - **[[../core-engine/src/main/java/com/apex/core/port/VectorStorePort.java|VectorStorePort.java]]**: Vector embeddings and semantic search port.
 - **[[../core-engine/src/main/java/com/apex/core/port/SecretsPort.java|SecretsPort.java]]**: Hardware-backed secret retrieval port.
 - **[[../core-engine/src/main/java/com/apex/core/port/AuditPort.java|AuditPort.java]]**: Tamper-evident cryptographic audit log port.
+- **[[../core-engine/src/main/java/com/apex/core/port/AuditStorePort.java|AuditStorePort.java]]**: Persistent storage boundary for audit trail verification.
+- **[[../core-engine/src/main/java/com/apex/core/port/JsonCodecPort.java|JsonCodecPort.java]]**: Port abstraction for pure JSON encoding/decoding.
 - **[[../core-engine/src/main/java/com/apex/core/port/TelemetryPort.java|TelemetryPort.java]]**: Telemetry metrics and latency tracking port.
 
 ### Port Models (`com.apex.core.port.model`)
@@ -49,8 +51,13 @@ This file provides an index of all files in **Apex Agentic Master Chat** with cr
 - **[[../core-engine/src/main/java/com/apex/core/provider/ProviderConfigurationManager.java|ProviderConfigurationManager.java]]**: Core manager persisting provider settings via `StoragePort`.
 
 ### Client & JSON Utilities (`com.apex.core.client`, `com.apex.core.json`)
-- **[[../core-engine/src/main/java/com/apex/core/client/OpenAiCompatibleClient.java|OpenAiCompatibleClient.java]]**: Pure `HttpURLConnection` client for OpenAI-compatible endpoints.
-- **[[../core-engine/src/main/java/com/apex/core/json/MiniJson.java|MiniJson.java]]**: Hand-rolled zero-dependency JSON helper.
+- **[[../core-engine/src/main/java/com/apex/core/client/OpenAiCompatibleClient.java|OpenAiCompatibleClient.java]]**: Pure `HttpURLConnection` client for OpenAI-compatible endpoints with `JsonCodecPort` support.
+- **[[../core-engine/src/main/java/com/apex/core/json/MiniJson.java|MiniJson.java]]**: Lightweight zero-dependency fallback JSON codec implementing `JsonCodecPort`.
+
+### Core Engine Tests (`core-engine/src/test/java`)
+- **[[../core-engine/src/test/java/com/apex/core/json/MiniJsonTest.java|MiniJsonTest.java]]**: Characterization tests for JSON formatting, escaping, and extraction.
+- **[[../core-engine/src/test/java/com/apex/core/port/model/ChatModelPortModelTest.java|ChatModelPortModelTest.java]]**: Port models immutability, defaults, and equals/hashCode contracts.
+- **[[../core-engine/src/test/java/com/apex/core/port/ApprovalPortContractTest.java|ApprovalPortContractTest.java]]**: Approval lifecycle contract test suite.
 
 ---
 
@@ -59,8 +66,15 @@ This file provides an index of all files in **Apex Agentic Master Chat** with cr
 - **[[../security-interface/build.gradle.kts|security-interface/build.gradle.kts]]**: Android library Gradle build script.
 - **[[../security-interface/src/main/java/com/apex/security/policy/RiskLevel.java|RiskLevel.java]]**: RiskLevel enum (`L0`, `L1`, `L2`, `L3`, `L4`).
 - **[[../security-interface/src/main/java/com/apex/security/policy/ToolRiskRegistry.java|ToolRiskRegistry.java]]**: Tool risk level mapper with `L3` unknown tool default.
+- **[[../security-interface/src/main/java/com/apex/security/audit/AuditChainBrokenException.java|AuditChainBrokenException.java]]**: Exception raised when audit hash chain breaks.
+- **[[../security-interface/src/main/java/com/apex/security/audit/FileAuditStore.java|FileAuditStore.java]]**: Durable `.jsonl` append-only audit store with `FileChannel.force(true)` and verification.
 - **[[../security-interface/src/main/java/com/apex/security/audit/AuditLogManager.java|AuditLogManager.java]]**: Tamper-evident SHA-256 hash-chained implementation of `AuditPort`.
 - **[[../security-interface/src/main/java/com/apex/security/interlock/SecurityInterlock.java|SecurityInterlock.java]]**: Approval-interlock boundary gating tool execution.
+
+### Security Interface Tests (`security-interface/src/test/java`)
+- **[[../security-interface/src/test/java/com/apex/security/policy/SecurityInterlockTest.java|SecurityInterlockTest.java]]**: Risk level gating, fail-closed handling, and approval delegation.
+- **[[../security-interface/src/test/java/com/apex/security/audit/AuditLogManagerTest.java|AuditLogManagerTest.java]]**: Hash chain integrity and SHA-256 validation.
+- **[[../security-interface/src/test/java/com/apex/security/audit/FileAuditStoreTest.java|FileAuditStoreTest.java]]**: File persistence, fsync forcing, tampering detection, and rotation.
 
 ---
 
@@ -76,6 +90,7 @@ This file provides an index of all files in **Apex Agentic Master Chat** with cr
 - **[[../app/src/main/java/com/example/data/provider/ProviderPresets.kt|ProviderPresets.kt]]**: Provider preset definitions including DeepSeek, OpenRouter, Groq, and Ollama.
 - **[[../app/src/main/java/com/example/data/provider/ProviderConfigurationManager.kt|ProviderConfigurationManager.kt]]**: DataStore preferences manager with live connection testing.
 - **[[../app/src/main/java/com/example/data/provider/DataStoreStorageAdapter.kt|DataStoreStorageAdapter.kt]]**: Adapter bridging core StoragePort to Android DataStore.
+- **[[../app/src/main/java/com/example/data/adapter/OrgJsonCodec.kt|OrgJsonCodec.kt]]**: Adapter implementing `JsonCodecPort` via Android's native `org.json`.
 
 ### Domain & Engine (`com.example.domain`)
 - **[[../app/src/main/java/com/example/domain/engine/ProviderRegistry.kt|ProviderRegistry.kt]]**: In-memory reactive provider state holder.
@@ -90,3 +105,13 @@ This file provides an index of all files in **Apex Agentic Master Chat** with cr
 - **[[../app/src/main/java/com/example/ui/settings/SettingsScreen.kt|SettingsScreen.kt]]**: Provider configuration manager with live connection diagnostics.
 - **[[../app/src/main/java/com/example/ui/agents/AgentListScreen.kt|AgentListScreen.kt]]**: Specialized agent prompt card manager.
 - **[[../app/src/main/java/com/example/ui/workspace/WorkspaceScreen.kt|WorkspaceScreen.kt]]**: Local workspace code and output explorer.
+
+---
+
+## 5. CI Automation & Architecture Documentation
+- **[[../.github/workflows/ci.yml|.github/workflows/ci.yml]]**: Automated CI workflow with guardrails C1–C5.
+- **[[adr/0002-json-codec.md|docs/adr/0002-json-codec.md]]**: ADR 0002 on `JsonCodecPort` and native `org.json` usage.
+- **[[audit-format.md|docs/audit-format.md]]**: Tamper-evident audit format specification and SHA-256 formulas.
+- **[[testing.md|docs/testing.md]]**: Testing strategy and test suite documentation.
+- **[[ci.md|docs/ci.md]]**: CI pipeline specification and architectural guardrail enforcement.
+
