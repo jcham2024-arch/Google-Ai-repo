@@ -1,0 +1,2 @@
+# Allowed runtime dependencies for :core-engine
+# Governed by docs/adr/0003-core-engine-dependencies.md

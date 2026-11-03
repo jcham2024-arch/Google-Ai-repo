@@ -1,0 +1,16 @@
+{
+  "id": "chatcmpl-retry-success",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-4o",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Request succeeded after rate limit retry."
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

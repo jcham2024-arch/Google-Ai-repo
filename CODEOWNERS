@@ -1,0 +1,6 @@
+# CODEOWNERS for Apex Agent Management Chat
+
+/core-engine/                 @jcham2024-arch
+/security-interface/          @jcham2024-arch
+/docs/security/               @jcham2024-arch
+/.github/workflows/           @jcham2024-arch

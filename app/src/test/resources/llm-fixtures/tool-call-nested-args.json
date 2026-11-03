@@ -1,0 +1,26 @@
+{
+  "id": "chatcmpl-nested-1",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-4o",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Executing nested operation.",
+        "tool_calls": [
+          {
+            "id": "call_nested_99",
+            "type": "function",
+            "function": {
+              "name": "run_command",
+              "arguments": "{\"cmd\":\"ls -la\",\"env\":{\"NODE_ENV\":\"production\"}}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ]
+}

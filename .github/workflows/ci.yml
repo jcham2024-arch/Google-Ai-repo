@@ -30,7 +30,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # --- Architectural Guardrail Checks (C1 - C4) ---
+      # --- Architectural Guardrail Checks (C1 - C8) ---
 
       - name: "Guardrail C1: Verify Zero Dependencies in :core-engine"
         run: |
@@ -72,6 +72,24 @@ jobs:
           fi
           echo "PASS: Production app correctly uses JsonCodecPort abstractions."
 
+      - name: "Guardrail C6: Verify No Direct HttpURLConnection in Production app/..."
+        run: |
+          echo "Checking for illegal HttpURLConnection usage in app/src/main/..."
+          if grep -rn "HttpURLConnection" app/src/main/; then
+            echo "ERROR: Violation of Guardrail C6 - Production app code must route network calls through HttpTransportPort!"
+            exit 1
+          fi
+          echo "PASS: Production app uses HttpTransportPort abstraction."
+
+      - name: "Guardrail C8: Verify No Raw Print Statements in Source Code"
+        run: |
+          echo "Checking for illegal println/printStackTrace/System.out calls in source code..."
+          if grep -rn "System\.out\|println\|printStackTrace" core-engine/src/main/ security-interface/src/main/ app/src/main/; then
+            echo "ERROR: Violation of Guardrail C8 - Use TelemetryPort logging instead of print statements!"
+            exit 1
+          fi
+          echo "PASS: Production source code uses TelemetryPort logging."
+
       # --- Secret Scanning (C5) ---
 
       - name: "Guardrail C5: Secret Scanning"
@@ -82,7 +100,7 @@ jobs:
 
       # --- Compile and Test ---
 
-      - name: Run Unit Tests
+      - name: Run Unit & E2E Integration Tests
         run: |
           chmod +x ./gradlew || true
           gradle test --no-daemon

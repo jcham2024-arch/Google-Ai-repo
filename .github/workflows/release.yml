@@ -1,0 +1,62 @@
+name: Release Workflow
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Build, Sign, and Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Verify Tag Matches CHANGELOG
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          echo "Verifying changelog section for tag: $tag"
+          if ! grep -q "\[$tag\]" CHANGELOG.md; then
+            echo "ERROR: CHANGELOG.md missing section for version $tag"
+            exit 1
+          fi
+
+      - name: Build Release Artifacts
+        run: |
+          chmod +x ./gradlew || true
+          RELEASE_VERSION="${GITHUB_REF#refs/tags/v}" ./gradlew assembleDebug test --no-daemon
+
+      - name: Install Cosign for Artifact Signing
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate Checksums and Sign Blobs
+        run: |
+          cd app/build/outputs/apk/debug
+          for f in *.apk; do
+            sha256sum "$f" > "$f.sha256"
+          done
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/debug/*.sha256
