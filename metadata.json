@@ -1,0 +1,6 @@
+{
+  "name": "Apex Agentic Master Chat",
+  "description": "Advanced offline-first AI chat and agent orchestration platform with Perchance integration, web search grounding, self-improvement capabilities, and granular permission controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
