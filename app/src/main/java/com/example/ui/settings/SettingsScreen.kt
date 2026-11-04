@@ -6,9 +6,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Visibility
@@ -48,6 +48,10 @@ fun SettingsScreen(
     var providerToEditKey by remember { mutableStateOf<ProviderSettings?>(null) }
     var editKeyInput by remember { mutableStateOf("") }
     var showKeyVisibility by remember { mutableStateOf(false) }
+
+    // Dialog state for editing Model ID
+    var providerToEditModel by remember { mutableStateOf<ProviderSettings?>(null) }
+    var editModelInput by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -143,9 +147,35 @@ fun SettingsScreen(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(text = "Base URL: ${provider.baseUrl}", style = MaterialTheme.typography.bodySmall)
-                            Text(text = "Default Model: ${provider.defaultModel}", style = MaterialTheme.typography.bodySmall)
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            // Model ID Row with Edit Action
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Default Model: ${provider.defaultModel}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                TextButton(
+                                    onClick = {
+                                        providerToEditModel = provider
+                                        editModelInput = provider.defaultModel
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Change Model", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -239,7 +269,7 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = modelInput,
                         onValueChange = { modelInput = it },
-                        label = { Text("Default Model") },
+                        label = { Text("Default Model ID") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
@@ -296,6 +326,55 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Dedicated Dialog for Editing Model ID
+    providerToEditModel?.let { targetProvider ->
+        AlertDialog(
+            onDismissRequest = { providerToEditModel = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Edit Model ID: ${targetProvider.name}")
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Change the default model identifier for ${targetProvider.name} (e.g. gpt-4o, claude-3-5-sonnet, gemini-2.5-flash).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+
+                    OutlinedTextField(
+                        value = editModelInput,
+                        onValueChange = { editModelInput = it },
+                        label = { Text("Model ID") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editModelInput.isNotBlank()) {
+                        viewModel.saveProvider(targetProvider.copy(defaultModel = editModelInput.trim()))
+                        providerToEditModel = null
+                    }
+                }) {
+                    Text("Save Model ID")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { providerToEditModel = null }) {
                     Text("Cancel")
                 }
             }

@@ -47,6 +47,7 @@ class ProviderConfigurationManager(private val context: Context) {
                     val id = obj.getString("id")
                     val encryptedKey = obj.optString("apiKey", "")
                     val decryptedKey = if (encryptedKey.isNotBlank()) keyStoreManager.decrypt(encryptedKey).ifBlank { encryptedKey } else ""
+                    val maxTokens = obj.optInt("maxTokens", 4096)
                     list.add(
                         ProviderSettings(
                             id = id,
@@ -54,6 +55,7 @@ class ProviderConfigurationManager(private val context: Context) {
                             baseUrl = obj.getString("baseUrl"),
                             apiKey = decryptedKey,
                             defaultModel = obj.optString("defaultModel", "default-model"),
+                            maxTokens = maxTokens,
                             isActive = id == activeId
                         )
                     )
@@ -87,6 +89,7 @@ class ProviderConfigurationManager(private val context: Context) {
                         val id = obj.getString("id")
                         val encryptedKey = obj.optString("apiKey", "")
                         val decryptedKey = if (encryptedKey.isNotBlank()) keyStoreManager.decrypt(encryptedKey).ifBlank { encryptedKey } else ""
+                        val maxTokens = obj.optInt("maxTokens", 4096)
                         list.add(
                             ProviderSettings(
                                 id = id,
@@ -94,6 +97,7 @@ class ProviderConfigurationManager(private val context: Context) {
                                 baseUrl = obj.getString("baseUrl"),
                                 apiKey = decryptedKey,
                                 defaultModel = obj.optString("defaultModel", "default-model"),
+                                maxTokens = maxTokens,
                                 isActive = false
                             )
                         )
@@ -120,6 +124,7 @@ class ProviderConfigurationManager(private val context: Context) {
                     put("baseUrl", p.baseUrl)
                     put("apiKey", encryptedKey)
                     put("defaultModel", p.defaultModel)
+                    put("maxTokens", p.maxTokens)
                 })
             }
             preferences[KEY_PROVIDERS_JSON] = newArray.toString()
@@ -143,6 +148,7 @@ class ProviderConfigurationManager(private val context: Context) {
                         val id = obj.getString("id")
                         val encryptedKey = obj.optString("apiKey", "")
                         val decryptedKey = if (encryptedKey.isNotBlank()) keyStoreManager.decrypt(encryptedKey).ifBlank { encryptedKey } else ""
+                        val maxTokens = obj.optInt("maxTokens", 4096)
                         list.add(
                             ProviderSettings(
                                 id = id,
@@ -150,6 +156,7 @@ class ProviderConfigurationManager(private val context: Context) {
                                 baseUrl = obj.getString("baseUrl"),
                                 apiKey = if (id == providerId) newApiKey else decryptedKey,
                                 defaultModel = obj.optString("defaultModel", "default-model"),
+                                maxTokens = maxTokens,
                                 isActive = false
                             )
                         )
@@ -174,6 +181,61 @@ class ProviderConfigurationManager(private val context: Context) {
                     put("baseUrl", p.baseUrl)
                     put("apiKey", encryptedKey)
                     put("defaultModel", p.defaultModel)
+                    put("maxTokens", p.maxTokens)
+                })
+            }
+            preferences[KEY_PROVIDERS_JSON] = newArray.toString()
+        }
+    }
+
+    suspend fun updateModelId(providerId: String, newModelId: String) = withContext(Dispatchers.IO) {
+        context.providerDataStore.edit { preferences ->
+            val jsonStr = preferences[KEY_PROVIDERS_JSON]
+            val currentList = if (jsonStr.isNullOrBlank()) {
+                ProviderPresets.PRESETS.toMutableList()
+            } else {
+                try {
+                    val array = JSONArray(jsonStr)
+                    val list = mutableListOf<ProviderSettings>()
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        val id = obj.getString("id")
+                        val encryptedKey = obj.optString("apiKey", "")
+                        val decryptedKey = if (encryptedKey.isNotBlank()) keyStoreManager.decrypt(encryptedKey).ifBlank { encryptedKey } else ""
+                        val maxTokens = obj.optInt("maxTokens", 4096)
+                        list.add(
+                            ProviderSettings(
+                                id = id,
+                                name = obj.getString("name"),
+                                baseUrl = obj.getString("baseUrl"),
+                                apiKey = decryptedKey,
+                                defaultModel = if (id == providerId) newModelId else obj.optString("defaultModel", "default-model"),
+                                maxTokens = maxTokens,
+                                isActive = false
+                            )
+                        )
+                    }
+                    list
+                } catch (e: Exception) {
+                    ProviderPresets.PRESETS.toMutableList()
+                }
+            }
+
+            val index = currentList.indexOfFirst { it.id == providerId }
+            if (index >= 0) {
+                currentList[index] = currentList[index].copy(defaultModel = newModelId)
+            }
+
+            val newArray = JSONArray()
+            currentList.forEach { p ->
+                val encryptedKey = if (p.apiKey.isNotBlank()) keyStoreManager.encrypt(p.apiKey) else ""
+                newArray.put(JSONObject().apply {
+                    put("id", p.id)
+                    put("name", p.name)
+                    put("baseUrl", p.baseUrl)
+                    put("apiKey", encryptedKey)
+                    put("defaultModel", p.defaultModel)
+                    put("maxTokens", p.maxTokens)
                 })
             }
             preferences[KEY_PROVIDERS_JSON] = newArray.toString()
@@ -209,7 +271,6 @@ class ProviderConfigurationManager(private val context: Context) {
     suspend fun testConnection(baseUrl: String, apiKey: String, model: String): Result<String> = withContext(Dispatchers.IO) {
         val cleanBaseUrl = baseUrl.trimEnd('/')
 
-        // Step 1: Try GET {baseUrl}/models
         val modelsUrl = if (cleanBaseUrl.endsWith("/models")) cleanBaseUrl else "$cleanBaseUrl/models"
         val modelsRequest = Request.Builder()
             .url(modelsUrl)
@@ -229,11 +290,8 @@ class ProviderConfigurationManager(private val context: Context) {
                     return@withContext Result.success("Connection Successful! /models returned $modelCount models.")
                 }
             }
-        } catch (_: Exception) {
-            // Fall back to chat completions ping
-        }
+        } catch (_: Exception) {}
 
-        // Step 2: Fall back to POST {baseUrl}/chat/completions with max_tokens: 1
         val chatUrl = if (cleanBaseUrl.endsWith("/chat/completions")) cleanBaseUrl else "$cleanBaseUrl/chat/completions"
         val pingBody = JSONObject().apply {
             put("model", model.ifBlank { "gpt-4o" })
