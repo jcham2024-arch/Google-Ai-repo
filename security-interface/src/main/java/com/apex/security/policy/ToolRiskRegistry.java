@@ -8,10 +8,10 @@ public class ToolRiskRegistry {
 
     public ToolRiskRegistry() {
         // Seed standard risk mappings
-        mappings.put("read_file", RiskLevel.L0);
-        mappings.put("list_files", RiskLevel.L0);
-        mappings.put("write_file", RiskLevel.L1);
-        mappings.put("write_file_external", RiskLevel.L2);
+        mappings.put("read_file", RiskLevel.L2);
+        mappings.put("list_files", RiskLevel.L2);
+        mappings.put("write_file", RiskLevel.L3);
+        mappings.put("write_file_external", RiskLevel.L3);
         mappings.put("http_get", RiskLevel.L2);
         mappings.put("http_post", RiskLevel.L3);
         mappings.put("run_command", RiskLevel.L4);

@@ -10,6 +10,13 @@ data class AgentExecutionStep(
     val details: String = ""
 )
 
+data class DelegationInfo(
+    val fromAgent: String,
+    val toAgent: String,
+    val task: String,
+    val status: String // "DELEGATING", "EXECUTING", "COMPLETED"
+)
+
 data class ToolApprovalUiState(
     val requestId: String,
     val toolName: String,
@@ -22,8 +29,10 @@ data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
     val isGenerating: Boolean = false,
     val agentSteps: List<AgentExecutionStep> = emptyList(),
+    val delegationChain: List<DelegationInfo> = emptyList(),
     val pendingToolApproval: ToolApprovalUiState? = null,
     val isOffline: Boolean = false,
     val offlineQueueCount: Int = 0,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val toolsEnabled: Boolean = true
 )

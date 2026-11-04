@@ -8,14 +8,47 @@ import kotlinx.coroutines.runBlocking
 import java.util.concurrent.ConcurrentHashMap
 
 class AndroidApprovalPort(
-    private val onApprovalRequested: (ApprovalRequest) -> Unit
+    private val onApprovalRequested: (ApprovalRequest) -> Unit,
+    private val getFileContent: ((String) -> String?)? = null
 ) : ApprovalPort {
     private val pendingDeferreds = ConcurrentHashMap<String, CompletableDeferred<ApprovalDecision>>()
 
     override fun requestApproval(request: ApprovalRequest): ApprovalDecision {
+        // For write_file, fetch current file content and generate diff
+        val enhancedRequest = if (request.toolName == "write_file" && getFileContent != null) {
+            val path = request.arguments["path"]
+            val newContent = request.arguments["content"]
+            if (path != null && newContent != null) {
+                val oldContent = getFileContent(path)
+                if (oldContent != null && oldContent != newContent) {
+                    val diff = DiffUtil.generateDiff(oldContent, newContent)
+                    val diffSummary = DiffUtil.generateDiffSummary(oldContent, newContent)
+                    val enhancedReason = "${request.reason}\n\n$diffSummary"
+                    // Create enhanced request with diff info in arguments
+                    val enhancedArgs = request.arguments.toMutableMap()
+                    enhancedArgs["_diff_summary"] = diffSummary
+                    enhancedArgs["_old_content"] = oldContent
+                    enhancedArgs["_new_content"] = newContent
+                    ApprovalRequest(
+                        requestId = request.requestId,
+                        toolName = request.toolName,
+                        arguments = enhancedArgs,
+                        riskLevel = request.riskLevel,
+                        reason = enhancedReason
+                    )
+                } else {
+                    request
+                }
+            } else {
+                request
+            }
+        } else {
+            request
+        }
+        
         val deferred = CompletableDeferred<ApprovalDecision>()
-        pendingDeferreds[request.requestId] = deferred
-        onApprovalRequested(request)
+        pendingDeferreds[enhancedRequest.requestId] = deferred
+        onApprovalRequested(enhancedRequest)
         return runBlocking {
             deferred.await()
         }

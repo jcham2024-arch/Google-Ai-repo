@@ -9,7 +9,10 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Audit log manager implementing {@link AuditPort} and delegating persistence to an {@link AuditStorePort}.
@@ -47,9 +50,96 @@ public class AuditLogManager implements AuditPort {
         }
     }
 
+    /**
+     * Canonicalizes a map to a deterministic JSON string by sorting keys recursively.
+     */
+    private static String canonicalizeArguments(Map<String, String> arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return "{}";
+        }
+        // Use TreeMap to ensure sorted keys
+        Map<String, Object> sorted = new TreeMap<>();
+        for (Map.Entry<String, String> entry : arguments.entrySet()) {
+            sorted.put(entry.getKey(), entry.getValue());
+        }
+        return toCanonicalJson(sorted);
+    }
+
+    private static String toCanonicalJson(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof String) {
+            return escapeJson((String) value);
+        }
+        if (value instanceof Number || value instanceof Boolean) {
+            return value.toString();
+        }
+        if (value instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) value;
+            // Use TreeMap to ensure sorted keys recursively
+            Map<String, Object> sortedMap = new TreeMap<>();
+            for (Map.Entry<String, Object> entry : map.entrySet()) {
+                sortedMap.put(entry.getKey(), entry.getValue());
+            }
+            StringBuilder sb = new StringBuilder("{");
+            boolean first = true;
+            for (Map.Entry<String, Object> entry : sortedMap.entrySet()) {
+                if (!first) sb.append(",");
+                first = false;
+                sb.append(escapeJson(entry.getKey())).append(":");
+                sb.append(toCanonicalJson(entry.getValue()));
+            }
+            sb.append("}");
+            return sb.toString();
+        }
+        if (value instanceof List) {
+            @SuppressWarnings("unchecked")
+            List<Object> list = (List<Object>) value;
+            StringBuilder sb = new StringBuilder("[");
+            boolean first = true;
+            for (Object item : list) {
+                if (!first) sb.append(",");
+                first = false;
+                sb.append(toCanonicalJson(item));
+            }
+            sb.append("]");
+            return sb.toString();
+        }
+        // Fallback: treat as string
+        return escapeJson(value.toString());
+    }
+
+    private static String escapeJson(String s) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < ' ') {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        sb.append('"');
+        return sb.toString();
+    }
+
     public synchronized AuditRecord createAndAppend(long timestamp, String toolName, String riskLevel,
-                                                    String decision, String arguments) {
-        String argsHash = sha256(arguments != null ? arguments : "");
+                                                    String decision, Map<String, String> arguments) {
+        String canonicalArgs = canonicalizeArguments(arguments);
+        String argsHash = sha256(canonicalArgs);
         String raw = timestamp + ":" + toolName + ":" + riskLevel + ":" + decision + ":" + argsHash + ":" + lastHash;
         String entryHash = sha256(raw);
 
