@@ -38,7 +38,7 @@ class ChatViewModel(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
     
     // Track the current generation job for cancellation
-    private var currentGenerationJob: androidx.coroutines.Job? = null
+    private var currentGenerationJob: kotlinx.coroutines.Job? = null
     private var currentWorkRequestId: String? = null
 
     init {
@@ -219,7 +219,7 @@ class ChatViewModel(
         val messages = _uiState.value.messages
         val markdown = StringBuilder()
         markdown.append("# Conversation Export\n\n")
-        markdown.append("**Date:** ${java.text.SimpleDateFormat(\"yyyy-MM-dd HH:mm:ss\", java.util.Locale.getDefault()).format(java.util.Date())}\n")
+        markdown.append("**Date:** " + java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date()) + "\n")
         markdown.append("**Chat ID:** $chatId\n\n")
         markdown.append("---\n\n")
         
@@ -229,14 +229,15 @@ class ChatViewModel(
             markdown.append("## $sender *($timestamp)*\n\n")
             markdown.append("${message.content}\n\n")
             
-            if (message.toolCallsJson != null && message.toolCallsJson!.isNotBlank()) {
+            val json = message.toolCallsJson
+            if (!json.isNullOrBlank()) {
                 markdown.append("**Tool Calls:**\n\n")
                 try {
                     val gson = com.google.gson.Gson()
                     val type = object : com.google.gson.reflect.TypeToken<List<com.apex.core.port.model.ToolCall>>() {}.type
-                    val toolCalls = gson.fromJson<List<com.apex.core.port.model.ToolCall>>(message.toolCallsJson!!, type)
+                    val toolCalls: List<com.apex.core.port.model.ToolCall> = gson.fromJson(json, type) ?: emptyList()
                     for (toolCall in toolCalls) {
-                        markdown.append("- **${toolCall.name}**: `${toolCall.arguments}`\n")
+                        markdown.append("- **${toolCall.toolName}**: `${toolCall.arguments}`\n")
                     }
                 } catch (e: Exception) {
                     markdown.append("- Error parsing tool calls\n")

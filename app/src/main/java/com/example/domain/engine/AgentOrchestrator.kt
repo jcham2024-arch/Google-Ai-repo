@@ -312,7 +312,7 @@ class AgentOrchestrator(
             )
             else -> mapOf(
                 "type" to "object",
-                "properties" to mapOf(),
+                "properties" to emptyMap<String, Any>(),
                 "required" to emptyList<String>()
             )
         }

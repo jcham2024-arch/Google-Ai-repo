@@ -17,11 +17,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.navArgument
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.launch
 import com.example.ui.agents.AgentListScreen
 import com.example.ui.chat.ChatScreen
 import com.example.ui.conversations.ConversationListScreen
@@ -35,13 +37,17 @@ sealed class Screen(val route: String, val title: String, val icon: androidx.com
     object Workspace : Screen("workspace", "Workspace", Icons.Default.Code)
     object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 
-    fun chatRoute(chatId: String) = "chat/$chatId"
+    companion object {
+        fun chatRoute(chatId: String) = "chat/$chatId"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val items = listOf(
         Screen.Chat,
         Screen.Conversations,
@@ -84,9 +90,12 @@ fun AppNavigation() {
         ) {
             composable(
                 route = Screen.Chat.route,
-                arguments = listOf(navArgument("chatId") { defaultValue = "default" })
+                arguments = listOf(navArgument("chatId") { 
+                    type = NavType.StringType
+                    defaultValue = "default" 
+                })
             ) { backStackEntry ->
-                val chatId = backStackEntry.getString() ?: "default"
+                val chatId = backStackEntry.arguments?.getString("chatId") ?: "default"
                 ChatScreen(chatId = chatId)
             }
             composable(Screen.Conversations.route) { ConversationListScreen(
@@ -99,9 +108,7 @@ fun AppNavigation() {
                 },
                 onNewConversation = {
                     val newChatId = java.util.UUID.randomUUID().toString()
-                    val scope = rememberCoroutineScope()
-                    scope.launch {
-                        val context = LocalContext.current
+                    coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         val database = com.example.data.local.AppDatabase.getDatabase(context)
                         val conversation = com.example.data.model.ChatConversation(
                             id = newChatId,

@@ -25,16 +25,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
-import com.github.gfx.markdowncompose.Markdown
-import com.github.gfx.markdowncompose.MarkdownStyle
-import com.github.gfx.markdowncompose.MarkdownTheme
-import com.github.gfx.markdowncompose.InlineStyle
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.apex.core.port.model.ToolCall
@@ -84,6 +85,7 @@ fun ChatScreen(
     var attachedImage by remember { mutableStateOf<String?>(null) }
     var attachedImageMimeType by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -103,10 +105,7 @@ fun ChatScreen(
                     IconButton(
                         onClick = {
                             val markdown = viewModel.exportConversationAsMarkdown()
-                            val context = LocalContext.current
-                            val scope = rememberCoroutineScope()
-                            scope.launch {
-                                // Save to Downloads folder using MediaStore
+                            coroutineScope.launch {
                                 val fileName = "conversation_${java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())}.md"
                                 val resolver = context.contentResolver
                                 val contentValues = android.content.ContentValues().apply {
@@ -119,8 +118,7 @@ fun ChatScreen(
                                     resolver.openOutputStream(u)?.use { it.write(markdown.toByteArray()) }
                                 }
                             }
-                        },
-                        contentDescription = "Export Conversation as Markdown"
+                        }
                     ) {
                         Icon(Icons.Default.Download, contentDescription = "Export Conversation")
                     }
@@ -129,23 +127,21 @@ fun ChatScreen(
                     IconButton(
                         onClick = {
                             val markdown = viewModel.exportConversationAsMarkdown()
-                            val context = LocalContext.current
                             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                             val clip = android.content.ClipData.newPlainText("Conversation Export", markdown)
                             clipboard.setPrimaryClip(clip)
-                        },
-                        contentDescription = "Copy Conversation to Clipboard"
+                        }
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = "Copy Conversation")
                     }
                     
                     // Kill Switch - pauses tool execution
                     IconButton(
-                        onClick = { viewModel.toggleToolsEnabled() },
-                        tint = if (uiState.toolsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        onClick = { viewModel.toggleToolsEnabled() }
                     ) {
                         Icon(
-                            imageVector = if (uiState.toolsEnabled) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            imageVector = if (uiState.toolsEnabled) Icons.Default.Pause else Icons.Default.Refresh,
+                            tint = if (uiState.toolsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                             contentDescription = if (uiState.toolsEnabled) "Tools Enabled (Tap to Pause)" else "Tools Paused (Tap to Resume)"
                         )
                     }
@@ -153,11 +149,11 @@ fun ChatScreen(
                     // Cancel Generation button (only visible when generating)
                     if (uiState.isGenerating) {
                         IconButton(
-                            onClick = { viewModel.cancelGeneration() },
-                            tint = MaterialTheme.colorScheme.error
+                            onClick = { viewModel.cancelGeneration() }
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Stop,
+                                tint = MaterialTheme.colorScheme.error,
                                 contentDescription = "Cancel Generation"
                             )
                         }
@@ -262,7 +258,7 @@ fun ChatScreen(
                         uiState.delegationChain.forEachIndexed { index, delegation ->
                             val statusColor = when (delegation.status) {
                                 "DELEGATING" -> MaterialTheme.colorScheme.primary
-                                "EXECUTING" -> MaterialTheme.colorScheme.warning
+                                "EXECUTING" -> MaterialTheme.colorScheme.tertiary
                                 "COMPLETED" -> MaterialTheme.colorScheme.primary
                                 else -> MaterialTheme.colorScheme.outline
                             }
@@ -274,7 +270,7 @@ fun ChatScreen(
                             }
                             Column(modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp, start = 24.dp)
+                                .padding(start = 24.dp, top = 4.dp, bottom = 4.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -346,18 +342,22 @@ fun ChatScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val imageBitmap = android.graphics.BitmapFactory.decodeByteArray(
-                                    android.util.Base64.decode(base64, android.util.Base64.DEFAULT),
-                                    0,
-                                    android.util.Base64.decode(base64, android.util.Base64.DEFAULT).size
-                                )
-                                androidx.compose.ui.graphics.ImageBitmap.imageResource(imageBitmap).let { bitmap ->
-                                    androidx.compose.foundation.Image(
-                                        bitmap = bitmap.asImageBitmap(),
+                                val decodedBytes = try {
+                                    android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                                } catch (e: Exception) {
+                                    null
+                                }
+                                val bitmap = if (decodedBytes != null) {
+                                    android.graphics.BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)?.asImageBitmap()
+                                } else null
+
+                                if (bitmap != null) {
+                                    Image(
+                                        bitmap = bitmap,
                                         contentDescription = "Attached image",
                                         modifier = Modifier
                                             .size(100.dp)
-                                            .clip(androidx.compose.ui.graphics.RoundedCornerShape(8.dp))
+                                            .clip(RoundedCornerShape(8.dp))
                                     )
                                 }
                                 Column(
@@ -373,7 +373,7 @@ fun ChatScreen(
                                     )
                                 }
                                 IconButton(onClick = { attachedImage = null; attachedImageMimeType = null }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Remove image")
+                                    Icon(Icons.Default.Refresh, contentDescription = "Remove image")
                                 }
                             }
                         }
@@ -466,42 +466,44 @@ fun ChatScreen(
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold
                             )
-                            androidx.compose.foundation.lazy.LazyColumn(
+                            LazyColumn(
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp)
                                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                             ) {
-                                androidx.compose.foundation.lazy.items(diffLines) { diffLine ->
+                                items(diffLines) { diffLine ->
                                     val bgColor = when (diffLine.type) {
                                         DiffType.ADDED -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f)
                                         DiffType.REMOVED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-                                        else -> MaterialTheme.colorScheme.transparent
+                                        DiffType.UNCHANGED -> Color.Transparent
                                     }
                                     val textColor = when (diffLine.type) {
                                         DiffType.ADDED -> MaterialTheme.colorScheme.onTertiaryContainer
                                         DiffType.REMOVED -> MaterialTheme.colorScheme.onErrorContainer
-                                        else -> MaterialTheme.colorScheme.onSurface
+                                        DiffType.UNCHANGED -> MaterialTheme.colorScheme.onSurface
                                     }
                                     val prefix = when (diffLine.type) {
                                         DiffType.ADDED -> "+ "
                                         DiffType.REMOVED -> "- "
-                                        else -> "  "
+                                        DiffType.UNCHANGED -> "  "
                                     }
+                                    val lineNum = (diffLine.oldLineNumber ?: diffLine.newLineNumber)?.toString() ?: ""
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .background(bgColor)
-                                            .padding(16.dp),
+                                            .padding(horizontal = 8.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "${diffLine.oldLineNumber?.let { "$it" } ?: diffLine.newLineNumber?.let { "$it" } ?: ""}",
+                                            text = lineNum,
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.outline,
-                                            modifier = Modifier.width(40.dp)
+                                            modifier = Modifier.width(36.dp)
                                         )
                                         Text(
-                                            text = "$prefix${diffLine.content}",
+                                            text = prefix + diffLine.content,
                                             style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
                                             color = textColor
                                         )
@@ -568,11 +570,12 @@ fun ChatMessageItem(message: ChatMessage) {
 
     // Parse tool calls from JSON
     val toolCalls = remember(message) {
-        if (message.toolCallsJson != null && message.toolCallsJson!.isNotBlank()) {
+        val json = message.toolCallsJson
+        if (!json.isNullOrBlank()) {
             try {
                 val gson = Gson()
                 val type = object : TypeToken<List<ToolCall>>() {}.type
-                gson.fromJson<List<ToolCall>>(message.toolCallsJson!!, type)
+                gson.fromJson<List<ToolCall>>(json, type) ?: emptyList()
             } catch (e: Exception) {
                 emptyList()
             }
@@ -600,81 +603,10 @@ fun ChatMessageItem(message: ChatMessage) {
                 if (isUser) {
                     Text(text = message.content, style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    // Render markdown for agent messages
-                    Markdown(
-                        markdown = message.content,
-                        style = MarkdownStyle(
-                            theme = MarkdownTheme(
-                                codeBlockTheme = com.github.gfx.markdowncompose.CodeBlockTheme(
-                                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    textColor = MaterialTheme.colorScheme.onSurfaceContainerHighest,
-                                    inlineCodeBackgroundColor = MaterialTheme.colorScheme.surfaceContainer,
-                                    inlineCodeTextColor = MaterialTheme.colorScheme.onSurfaceContainer
-                                ),
-                                blockQuoteTheme = com.github.gfx.markdowncompose.BlockQuoteTheme(
-                                    borderColor = MaterialTheme.colorScheme.outline,
-                                    backgroundColor = MaterialTheme.colorScheme.surfaceContainer,
-                                    textColor = MaterialTheme.colorScheme.onSurfaceContainer
-                                ),
-                                a = InlineStyle(
-                                    color = MaterialTheme.colorScheme.primary
-                                ),
-                                strong = InlineStyle(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                emph = InlineStyle(
-                                    fontStyle = androidx.compose.ui.text.style.FontStyle.Italic
-                                ),
-                                heading1 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading2 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading3 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading4 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading5 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading6 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                paragraph = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 14.sp
-                                ),
-                                code = InlineStyle(
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.primary
-                                ),
-                                inlineCode = InlineStyle(
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            ),
-                            inlineStyles = com.github.gfx.markdowncompose.InlineStyles(
-                                text = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 14.sp
-                                )
-                            )
-                        )
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -721,20 +653,20 @@ fun ToolCallCard(toolCall: ToolCall) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
+                        imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Warning,
                         contentDescription = null,
                         tint = if (isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = toolCall.name,
+                        text = toolCall.toolName,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Text(
-                    text = if (isSuccess) "Success" : "Failed",
+                    text = if (isSuccess) "Success" else "Failed",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                 )
@@ -754,7 +686,7 @@ fun ToolCallCard(toolCall: ToolCall) {
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
             
@@ -763,7 +695,7 @@ fun ToolCallCard(toolCall: ToolCall) {
             if (displayOutput.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isSuccess) "Output:" : "Error:",
+                    text = if (isSuccess) "Output:" else "Error:",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.outline
@@ -773,7 +705,7 @@ fun ToolCallCard(toolCall: ToolCall) {
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 5,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
         }
@@ -828,8 +760,9 @@ fun rememberChatViewModel(chatId: String = "default"): ChatViewModel {
         val securityInterlock = com.apex.security.interlock.SecurityInterlock(toolRegistry, riskRegistry, auditLogManager, approvalPort)
         
         // Delegation callback to update UI
-        val delegationCallback = { fromAgent: String, toAgent: String, task: String ->
+        val delegationCallback: (String, String, String) -> Unit = { fromAgent: String, toAgent: String, task: String ->
             viewModelRef?.startDelegation(fromAgent, toAgent, task)
+            Unit
         }
         
         // Register delegate_task tool after securityInterlock is created

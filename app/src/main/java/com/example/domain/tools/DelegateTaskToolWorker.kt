@@ -7,6 +7,7 @@ import com.example.domain.engine.AgentOrchestrator
 import com.example.domain.gateway.UniversalAIGatewayImpl
 import com.example.domain.gateway.AIResponse
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 class DelegateTaskToolWorker(
@@ -27,13 +28,13 @@ class DelegateTaskToolWorker(
     }
 
     private suspend fun delegateTask(arguments: Map<String, String>): String = withContext(Dispatchers.IO) {
-        val targetAgentId = arguments["target_agent_id"] ?: return "Error: target_agent_id is required"
-        val taskDescription = arguments["task_description"] ?: return "Error: task_description is required"
+        val targetAgentId = arguments["target_agent_id"] ?: return@withContext "Error: target_agent_id is required"
+        val taskDescription = arguments["task_description"] ?: return@withContext "Error: task_description is required"
 
         // Load the target agent
         val database = AppDatabase.getDatabase(context)
         val targetAgent = database.apexDao().getAgentById(targetAgentId)
-            ?: return "Error: Agent '$targetAgentId' not found"
+            ?: return@withContext "Error: Agent '$targetAgentId' not found"
 
         // Get current agent name (from active agent)
         val currentAgentName = "Master Agent" // This would ideally come from the calling agent
@@ -60,6 +61,6 @@ class DelegateTaskToolWorker(
         // Notify about delegation completion
         onDelegation?.invoke(currentAgentName, targetAgent.name, "COMPLETED: ${response.text.take(100)}...")
 
-        return "Delegated to ${targetAgent.name}:\n${response.text}"
+        "Delegated to ${targetAgent.name}:\n${response.text}"
     }
 }

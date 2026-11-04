@@ -33,7 +33,7 @@ fun AgentListScreen() {
 
     LaunchedEffect(Unit) {
         dao.getAllAgents().collect { list ->
-            agents = list.ifEmpty {
+            agents = list.toList().ifEmpty {
                 val masterCard = AgentCard(
                     id = "agent_master",
                     name = "Master Agent",

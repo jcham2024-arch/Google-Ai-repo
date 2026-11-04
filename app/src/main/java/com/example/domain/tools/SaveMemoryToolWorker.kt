@@ -5,6 +5,8 @@ import com.example.data.local.AppDatabase
 import com.example.data.model.MemoryItem
 import com.example.domain.gateway.UniversalAIGatewayImpl
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
@@ -22,12 +24,12 @@ class SaveMemoryToolWorker(
     }
 
     private suspend fun saveMemory(arguments: Map<String, String>): String = withContext(Dispatchers.IO) {
-        val text = arguments["text"] ?: return "Error: 'text' argument is required"
+        val text = arguments["text"] ?: return@withContext "Error: 'text' argument is required"
         val agentId = arguments["agent_id"] ?: "default"
 
         // Generate embedding
         val database = AppDatabase.getDatabase(context)
-        val activeProvider = com.example.data.provider.ProviderConfigurationManager(context).getActiveProvider()
+        val activeProvider = com.example.data.provider.ProviderConfigurationManager(context).activeProviderFlow.first()
         val providerName = activeProvider?.name ?: "Google Gemini"
         val baseUrl = activeProvider?.baseUrl ?: "https://generativelanguage.googleapis.com/"
         val apiKey = activeProvider?.apiKey ?: ""
@@ -35,7 +37,7 @@ class SaveMemoryToolWorker(
         val embedding = try {
             gateway.getEmbeddings(text, providerName, baseUrl, apiKey)
         } catch (e: Exception) {
-            return "Error generating embedding: ${e.message}"
+            return@withContext "Error generating embedding: ${e.message}"
         }
 
         // Convert embedding to JSON string
@@ -52,6 +54,6 @@ class SaveMemoryToolWorker(
 
         database.apexDao().insertMemoryItem(memoryItem)
 
-        return "Memory saved successfully (ID: ${memoryItem.id})"
+        "Memory saved successfully (ID: ${memoryItem.id})"
     }
 }

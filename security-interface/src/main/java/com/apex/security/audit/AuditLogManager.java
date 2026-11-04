@@ -156,6 +156,12 @@ public class AuditLogManager implements AuditPort {
         return record;
     }
 
+    public synchronized AuditRecord createAndAppend(long timestamp, String toolName, String riskLevel,
+                                                    String decision, String reason) {
+        Map<String, String> args = Collections.singletonMap("reason", reason != null ? reason : "");
+        return createAndAppend(timestamp, toolName, riskLevel, decision, args);
+    }
+
     @Override
     public synchronized List<AuditRecord> getTrail() {
         if (store != null) {

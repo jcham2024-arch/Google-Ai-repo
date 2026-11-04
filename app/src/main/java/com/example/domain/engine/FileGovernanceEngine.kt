@@ -1,8 +1,10 @@
 package com.example.domain.engine
 
 import android.content.Context
-import androidx.lifecycle.MutableStateFlow
-import androidx.lifecycle.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import com.example.data.local.AppDatabase
 import com.example.data.model.WorkspaceFile
 import com.example.data.model.WorkspaceFileVersion
@@ -24,8 +26,8 @@ class FileGovernanceEngine(private val context: Context) {
     // Sandbox configuration
     private val sandboxRoot = File(context.filesDir, "workspace")
     companion object {
-        const val MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB per file
-        const val MAX_TOTAL_SIZE_BYTES = 100 * 1024 * 1024 // 100MB total
+        const val MAX_FILE_SIZE_BYTES = 10L * 1024 * 1024 // 10MB per file
+        const val MAX_TOTAL_SIZE_BYTES = 100L * 1024 * 1024 // 100MB total
         const val MAX_FILE_COUNT = 1000
         const val MAX_VERSIONS_PER_FILE = 10
     }
@@ -75,23 +77,23 @@ class FileGovernanceEngine(private val context: Context) {
         val totalSize = files.sumOf { it.sizeBytes }
         val fileCount = files.size
         
-        return (totalSize + newFileSize <= MAX_TOTAL_SIZE_BYTES) && (fileCount < MAX_FILE_COUNT)
+        (totalSize + newFileSize <= MAX_TOTAL_SIZE_BYTES) && (fileCount < MAX_FILE_COUNT)
     }
 
     suspend fun createFile(path: String, name: String, content: String): Boolean = withContext(Dispatchers.IO) {
         val fileSize = content.toByteArray().size.toLong()
         
         // Validate path
-        val targetFile = validatePath(path) ?: return false
+        val targetFile = validatePath(path) ?: return@withContext false
         
         // Check quota
         if (!checkQuota(fileSize)) {
-            return false
+            return@withContext false
         }
         
         // Check file size limit
         if (fileSize > MAX_FILE_SIZE_BYTES) {
-            return false
+            return@withContext false
         }
         
         try {
@@ -129,13 +131,13 @@ class FileGovernanceEngine(private val context: Context) {
 
     suspend fun applyApprovedSelfEdit(path: String, content: String): Boolean = withContext(Dispatchers.IO) {
         // Validate path
-        val targetFile = validatePath(path) ?: return false
+        val targetFile = validatePath(path) ?: return@withContext false
         
         val fileSize = content.toByteArray().size.toLong()
         
         // Check file size limit
         if (fileSize > MAX_FILE_SIZE_BYTES) {
-            return false
+            return@withContext false
         }
         
         // Get current version for history
@@ -182,12 +184,12 @@ class FileGovernanceEngine(private val context: Context) {
         val versions = dao.getFileVersions(path).first()
         if (versions.size > MAX_VERSIONS_PER_FILE) {
             val toDelete = versions.drop(MAX_VERSIONS_PER_FILE)
-            toDelete.forEach { dao.deleteFileVersions(it.filePath) } // This deletes all versions for the path, need a better approach
+            toDelete.forEach { dao.deleteFileVersions(it.filePath) }
         }
     }
     
     suspend fun deleteFile(path: String): Boolean = withContext(Dispatchers.IO) {
-        val targetFile = validatePath(path) ?: return false
+        val targetFile = validatePath(path) ?: return@withContext false
         
         try {
             dao.deleteWorkspaceFile(path)
@@ -212,10 +214,10 @@ class FileGovernanceEngine(private val context: Context) {
      * Restores a file to a specific version.
      */
     suspend fun restoreFileVersion(path: String, version: Int): Boolean = withContext(Dispatchers.IO) {
-        val targetFile = validatePath(path) ?: return false
+        val targetFile = validatePath(path) ?: return@withContext false
         
         val versions = dao.getFileVersions(path).first()
-        val versionToRestore = versions.firstOrNull { it.version == version } ?: return false
+        val versionToRestore = versions.firstOrNull { it.version == version } ?: return@withContext false
         
         val fileSize = versionToRestore.content.toByteArray().size.toLong()
         val nextVersion = (dao.getAllWorkspaceFiles().first().firstOrNull { it.path == path }?.version ?: 0) + 1

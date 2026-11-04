@@ -8,6 +8,8 @@ import com.example.domain.engine.AgentOrchestrator
 import com.example.domain.gateway.AIResponse
 import com.example.domain.repository.ChatRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 class AgentTaskWorker(
     context: Context,
@@ -24,10 +26,10 @@ class AgentTaskWorker(
     private val imageMimeType = inputData.getString("image_mime_type")
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        val database = AppDatabase.getDatabase(applicationContext)
+        val apexDao = database.apexDao()
+        val offlineQueueDao = database.offlineQueueDao()
         try {
-            val database = AppDatabase.getDatabase(applicationContext)
-            val chatRepository = ChatRepository.getInstance(applicationContext)
-            
             // Save user message with image
             val userMsg = com.example.data.model.ChatMessage(
                 chatId = chatId,
@@ -36,37 +38,51 @@ class AgentTaskWorker(
                 isUser = true,
                 providerUsed = "Local",
                 modelUsed = "User",
-                imageBase64 = imageBase64,
-                imageMimeType = imageMimeType
+                imageBase64 = if (imageBase64.isNullOrBlank()) null else imageBase64,
+                imageMimeType = if (imageMimeType.isNullOrBlank()) null else imageMimeType
             )
-            chatRepository.saveMessage(userMsg)
+            apexDao.insertMessage(userMsg)
 
             if (isOffline) {
                 // Queue for later
-                val offlineSyncManager = OfflineSyncManager.getInstance(applicationContext)
+                val offlineSyncManager = OfflineSyncManager(offlineQueueDao)
                 offlineSyncManager.enqueueChatMessage(prompt, systemInstruction)
                 return@withContext Result.success()
             }
 
-            // Execute agent turn with image
-            val agentOrchestrator = chatRepository.getAgentOrchestrator()
-            val response = if (imageBase64 != null) {
+            // Build dependencies for AgentOrchestrator
+            val configManager = com.example.data.provider.ProviderConfigurationManager(applicationContext)
+            val providerRegistry = com.example.domain.engine.ProviderRegistry(configManager, this)
+            val gateway = com.example.domain.gateway.UniversalAIGatewayImpl(applicationContext)
+            val toolRegistry = com.apex.core.tool.ToolRegistry()
+            val auditLogManager = com.apex.security.audit.AuditLogManager()
+            val riskRegistry = com.apex.security.policy.ToolRiskRegistry()
+            val securityInterlock = com.apex.security.interlock.SecurityInterlock(toolRegistry, riskRegistry, auditLogManager, null)
+
+            val agentOrchestrator = AgentOrchestrator(
+                providerRegistry = providerRegistry,
+                gateway = gateway,
+                toolRegistry = toolRegistry,
+                securityInterlock = securityInterlock
+            )
+
+            val effectiveModelOverride = if (modelOverride.isNullOrBlank()) null else modelOverride
+            val response = if (!imageBase64.isNullOrBlank()) {
                 agentOrchestrator.orchestrateTurnWithImage(
                     prompt = prompt,
                     systemInstruction = systemInstruction,
-                    modelOverride = modelOverride,
+                    modelOverride = effectiveModelOverride,
                     imageBase64 = imageBase64,
-                    imageMimeType = imageMimeType ?: "image/jpeg"
+                    imageMimeType = if (imageMimeType.isNullOrBlank()) "image/jpeg" else imageMimeType
                 )
             } else {
                 agentOrchestrator.orchestrateTurn(
                     prompt = prompt,
                     systemInstruction = systemInstruction,
-                    modelOverride = modelOverride
+                    modelOverride = effectiveModelOverride
                 )
             }
 
-            // Save assistant message
             val assistantMsg = com.example.data.model.ChatMessage(
                 chatId = chatId,
                 senderName = "Apex Agent",
@@ -77,11 +93,10 @@ class AgentTaskWorker(
                 hasSearchGrounding = response.hasSearchGrounding,
                 pendingFileEdit = response.suggestedFileEdit
             )
-            chatRepository.saveMessage(assistantMsg)
+            apexDao.insertMessage(assistantMsg)
 
             Result.success()
         } catch (e: Exception) {
-            // Save error message
             val errorMsg = com.example.data.model.ChatMessage(
                 chatId = chatId,
                 senderName = "System",
@@ -91,8 +106,7 @@ class AgentTaskWorker(
                 modelUsed = "Error"
             )
             try {
-                val chatRepository = ChatRepository.getInstance(applicationContext)
-                chatRepository.saveMessage(errorMsg)
+                apexDao.insertMessage(errorMsg)
             } catch (ignored: Exception) {}
 
             Result.failure()
