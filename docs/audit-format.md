@@ -1,54 +1,82 @@
-# Tamper-Evident Audit Format Specification
+# Audit Log Format
 
-## Overview
-Apex maintains a durable, append-only, cryptographically linked audit trail of every tool execution attempt and decision. Every record is stored as a single line of JSON (newline-delimited JSON / JSONL) in `audit_active.jsonl`.
+Implemented in `security-interface/src/main/java/com/apex/security/audit/`:
+`AuditLogManager` builds and verifies records, `FileAuditStore` persists them.
 
-## Invariants
-1. **Durability**: Every write commits synchronously to non-volatile storage via `FileChannel.force(true)` before the method returns.
-2. **Hash Chaining**: Every record's `entryHash` binds the current event state and the previous record's `entryHash`.
-3. **Genesis Hash**: The first record in an empty chain links to the genesis hash:
-   `0000000000000000000000000000000000000000000000000000000000000000` (64 zeros).
-4. **Fail-Closed Verification**: Any discrepancy between expected and observed hashes throws `AuditChainBrokenException` or returns the exact 0-based corruption index during `verify()`.
+## Storage layout
 
-## Record Schema
-Each line in `audit_active.jsonl` adheres to the following JSON structure:
+| Item | Value |
+| :--- | :--- |
+| Record encoding | One JSON object per line (JSONL), UTF-8 |
+| Active file | `audit_active.jsonl` inside the configured directory |
+| Archived file | `audit_<epochMillis>.jsonl` produced by `FileAuditStore.rotate()` |
+| Durability | Every append and rotation calls `FileChannel.force(true)` (fsync) |
+| JSON writing | Hand-rolled escaping in `AuditLogManager` (control characters become `\uXXXX`) |
 
-```json
-{
-  "seq": 0,
-  "ts": 1700000000000,
-  "tool": "read_file",
-  "risk": "L0",
-  "decision": "EXECUTED_OK",
-  "argsHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "prev": "0000000000000000000000000000000000000000000000000000000000000000",
-  "hash": "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"
-}
-```
+## Record schema
 
-### Field Definitions
-- `seq` (integer): Monotonically increasing 0-indexed sequence counter.
-- `ts` (long): Epoch timestamp in milliseconds.
-- `tool` (string): Unique identifier of the requested tool.
-- `risk` (string): Risk classification level (`L0`, `L1`, `L2`, `L3`, `L4`).
-- `decision` (string): Execution outcome (`EXECUTED_OK`, `DENIED`, `DENIED_NO_APPROVER`, `ERROR_NOT_FOUND`, `ERROR_THROWN`).
-- `argsHash` (string, 64 hex characters): SHA-256 digest of serialized arguments string.
-- `prev` (string, 64 hex characters): The `hash` of the immediately preceding record, or the 64-zero genesis hash.
-- `hash` (string, 64 hex characters): The canonical cryptographic digest of this entry.
+`com.apex.core.port.model.AuditRecord` has seven fields, all written in this order:
 
-## Canonical Hashing Formulas
-All digests use UTF-8 string encoding and produce 64-character lowercase hexadecimal outputs.
+| Field | Type | Meaning |
+| :--- | :--- | :--- |
+| `timestamp` | long | Epoch milliseconds at decision time |
+| `toolName` | string | Tool id; `unknown` or `invalid_call` for malformed calls |
+| `riskLevel` | string | `L0`–`L4` from `ToolRiskRegistry` |
+| `decision` | string | Outcome code (see below) |
+| `argumentsHash` | string | SHA-256 of the canonicalised argument map |
+| `previousHash` | string | `entryHash` of the preceding record, or the genesis hash |
+| `entryHash` | string | SHA-256 of this record's chain input |
 
-### Arguments Digest
-$$\text{argsHash} = \text{SHA-256}(\text{arguments})$$
+Null fields are coerced to empty strings by the model constructor.
 
-### Entry Digest
-$$\text{raw} = \text{timestamp} + \text{":"} + \text{toolName} + \text{":"} + \text{riskLevel} + \text{":"} + \text{decision} + \text{":"} + \text{argsHash} + \text{":"} + \text{previousHash}$$
+## Hash chain
 
-$$\text{entryHash} = \text{SHA-256}(\text{raw})$$
+- Genesis hash: 64 zero characters
+  (`AuditLogManager.GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"`).
+- Argument hash: `sha256(canonicalizeArguments(arguments))`, where arguments are ordered through a
+  `TreeMap` so key order does not change the hash.
+- Chain input: `timestamp + ":" + toolName + ":" + riskLevel + ":" + decision + ":" + argsHash + ":" + previousHash`.
+- Entry hash: `sha256(chain input)`, produced with `MessageDigest.getInstance("SHA-256")`.
 
-## Rotation & Archival
-When log rotation occurs (e.g. threshold reached or initiated via `FileAuditStore.rotate()`):
-1. The active `FileChannel` is flushed with `channel.force(true)` and closed.
-2. The active file `audit_active.jsonl` is renamed to `audit_<timestamp>.jsonl`.
-3. A new `audit_active.jsonl` is initialized, preserving chain continuity.
+Raw argument values are never stored; only the hash is. Two identical argument maps under the same
+preceding hash therefore produce identical records.
+
+## Decision codes
+
+Emitted by `SecurityInterlock`:
+
+| Code | Trigger |
+| :--- | :--- |
+| `DENIED_TOOLS_PAUSED` | Kill switch active; execution paused |
+| `DENIED_BUDGET_EXHAUSTED` | Iteration budget exceeded (default 10) |
+| `DENIED_MALFORMED` | Null or empty tool call / tool name |
+| `DENIED_NO_APPROVER` | Risk requires approval but no `ApprovalPort` is configured |
+| `DENIED_APPROVER_EXCEPTION` | The approval port threw |
+| `DENIED` | Approver refused the call |
+| `DENIED_REQUEST_ID_MISMATCH` | Approval decision belongs to a different request id |
+| `ERROR_NOT_FOUND` | No `ToolWorker` registered under the tool name |
+| `EXECUTED_OK` | Worker ran and returned output |
+| `ERROR_THROWN` | Worker threw; the exception message is returned to the caller |
+
+## Verification
+
+`AuditLogManager.verifyChain()` returns `true` when the whole chain validates. `FileAuditStore.verify()`
+returns the zero-based index of the first record whose `previousHash` does not match the accumulated
+hash, or `null` when the chain is intact. `AuditChainBrokenException` carries that index when thrown.
+
+When no store is supplied, `AuditLogManager` keeps an in-memory list, so the chain can be built and
+verified without touching disk — that is how the unit tests exercise it.
+
+## Known limitations
+
+0. Production wiring is in-memory only: `ChatScreen.kt:819` constructs `AuditLogManager()` without an
+   `AuditStorePort`, so the chain lives and dies with the process. `FileAuditStore` is exercised by
+   `AgentPipelineE2ETest` and `FileAuditStoreTest`, not by application code. Treat the file layout
+   above as the intended durable format rather than the current runtime behaviour.
+1. `SecurityInterlock.java:91,103,109` passes a `String` message where
+   `createAndAppend(long, String, String, String, Map<String, String>)` expects the argument map, so
+   those three call sites do not compile. The audit format above describes the intended, and for the
+   other seven call sites the actual, behaviour.
+2. There is no retention policy beyond manual rotation, and no signature or MAC over the chain; an
+   attacker who can rewrite every record can recompute a valid chain.
+3. `argumentsHash` hides values but does not prevent dictionary attacks on low-entropy arguments.

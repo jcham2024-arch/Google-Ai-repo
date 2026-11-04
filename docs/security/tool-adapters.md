@@ -1,18 +1,53 @@
-# Tool Adapter Security Checklist & Schema Requirements
+# Tool Adapter Security Checklist
 
-## Overview
-Every tool integrated into Apex must declare a strict schema and execute under `SecurityInterlock` governance.
+Every `ToolWorker` in `app/src/main/java/com/example/domain/tools/` runs behind `SecurityInterlock`.
+Risk classification comes from `ToolRiskRegistry`, not from the worker.
 
-## Mandatory Security Checklist for Tool Workers
-When adding or updating a `ToolWorker` implementation:
+## Current risk map (verified in `ToolRiskRegistry.java`)
 
-- [ ] **Declare Tool Schema**: Define required parameters using `ToolSchema.create(toolName, "param1", "param2")`.
-- [ ] **Input Sanitization**: Validate file paths, URL inputs, and command parameters before execution.
-- [ ] **No Dynamic Code Execution**: Do NOT execute raw untrusted string scripts or bytecode via `eval` or dynamic loading.
-- [ ] **Assign Risk Level**: Register appropriate `RiskLevel` in `ToolRiskRegistry`:
-  - `L0`: Read-only local inspection (`read_file`, `list_files`).
-  - `L1`: Local sandboxed state modification (`write_file`).
-  - `L2`: External network GET / read operations (`http_get`).
-  - `L3`: External network POST or mutating state (`http_post`).
-  - `L4`: Command execution or elevated privilege (`run_command`).
-- [ ] **Error Handling**: Wrap tool execution logic in safe try-catch blocks and return informative error strings without leaking internal stack traces.
+| Tool | Risk | Approval required |
+| :--- | :--- | :--- |
+| `read_file` | L2 | no |
+| `list_files` | L2 | no |
+| `http_get` | L2 | no |
+| `write_file` | L3 | yes |
+| `write_file_external` | L3 | yes |
+| `http_post` | L3 | yes |
+| `run_command` | L4 | yes |
+| any unregistered name | L3 (fail-closed default) | yes |
+
+An earlier version of this document listed `write_file` as L1 and `http_get` as L2 in a way that
+implied no approval; the table above is the behaviour that is actually implemented and tested
+(`SecurityInterlockTest.testUnknownToolFailsClosedToL3`).
+
+## Checklist for a new or changed worker
+
+1. Classify it: add an explicit `registerRisk(toolName, level)` entry or a seed line in
+   `ToolRiskRegistry`. Never rely on the L3 default for a tool that is genuinely read-only, and never
+   lower a level to avoid the approval prompt.
+2. Validate every argument before use; throw `IllegalArgumentException` for a missing or malformed
+   value. There is no schema validation layer yet.
+3. Validate paths through `FileGovernanceEngine.validatePath` (rejects absolute paths, `..`, and
+   canonical escapes) instead of joining raw strings to a base directory. The read tools currently do
+   not do this.
+4. Never execute untrusted text as code, shell, or bytecode. `run_command` deliberately returns a
+   formatted string and executes nothing.
+5. Return informative messages without stack traces or absolute device paths.
+6. Keep output bounded; large results are truncated by `AgentOrchestrator.truncateToolResult` before
+   returning to the model.
+7. Do not call `TelemetryPort` directly from a worker — the interceptor already emits `tool.invoke`,
+   `tool.invocations`, `tool.duration_ms` and `security.denials`. If you must, wrap through
+   `SafeTelemetryDecorator`.
+8. Add a unit test that asserts both the result and the interlock outcome (approval requested, or
+   denial recorded in the audit chain).
+
+## Actor-tool capabilities worth reviewing before release
+
+| Tool | Concern |
+| :--- | :--- |
+| `create_tool` | Registers new tool definitions at runtime; a registered tool inherits default L3 gating unless explicitly classified |
+| `delegate_task` | Spawns sub-agent work through the interlock; budget accounting is per interlock instance, not per delegation tree |
+| `http_post` | Sends model-chosen payloads to model-chosen URLs; an allow-list of hosts does not exist today |
+| `search_memory` / `save_memory` | Memory rows feed future prompts, so untrusted content can persist into later turns |
+| `write_file` | Validated by `FileGovernanceEngine`, capped at 10 MiB per file, versioned on every write |
+| `run_command` | Stub today; before implementing, decide the allowed command set, timeout, and output cap, and keep the level at L4 |

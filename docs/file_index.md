@@ -1,131 +1,85 @@
-# Master File Index & Repository Structure
+# Master File Index
 
-This file provides an index of all files in **Apex Agentic Master Chat** with cross-references to corresponding architectural documentation.
+Hub for the repository file index. Every tracked path is listed exactly once across this file and its
+four parts.
 
----
+- **208 tracked files** in total.
+- 12 root-level files, 25 documentation files, 3 modules, 2 workflow files, 10 imported AI Studio
+  assets.
 
-## 1. Root Configuration & Documentation
-- **[[../README.md|README.md]]**: Root system architecture, three-tier module topology, and build guides.
-- **[[../settings.gradle.kts|settings.gradle.kts]]**: Gradle settings declaring multi-module inclusion of `:app`, `:core-engine`, and `:security-interface`.
-- **[[../build.gradle.kts|build.gradle.kts]]**: Root build configuration with plugin aliases.
-- **[[../metadata.json|metadata.json]]**: AI Studio platform configuration and app metadata.
-- **[[../gradle/libs.versions.toml|libs.versions.toml]]**: Version catalog for dependencies and Gradle plugins.
+## Index parts
 
----
+| Part | Covers | Files |
+| :--- | :--- | ---: |
+| [file_index/core-engine.md](file_index/core-engine.md) | `core-engine/` — Java 11 engine, ports, models, tests | 48 |
+| [file_index/security-interface.md](file_index/security-interface.md) | `security-interface/` — interlock, policy, audit, tests | 16 |
+| [file_index/app-module.md](file_index/app-module.md) | `app/` — source, resources, tests, fixtures | 88 |
+| [file_index/project-tooling.md](file_index/project-tooling.md) | `.github/`, `gradle/`, `.aistudio/`, `public/` | 19 |
+| this file | root-level files and `docs/` | 37 |
 
-## 2. Module: `:core-engine` (Pure Java 11)
-- **[[../core-engine/README.md|core-engine/README.md]]**: Technical overview of the pure Java 11 headless engine.
-- **[[../core-engine/build.gradle.kts|core-engine/build.gradle.kts]]**: Java library Gradle build script.
-
-### Port Interfaces (`com.apex.core.port`)
-- **[[../core-engine/src/main/java/com/apex/core/port/ChatModelPort.java|ChatModelPort.java]]**: Port abstraction for LLM inference and streaming (`streamChat`).
-- **[[../core-engine/src/main/java/com/apex/core/port/HttpTransportPort.java|HttpTransportPort.java]]**: Pure Java 11 HTTP transport port boundary.
-- **[[../core-engine/src/main/java/com/apex/core/port/ChunkConsumer.java|ChunkConsumer.java]]**: Callback consumer for streaming HTTP chunks.
-- **[[../core-engine/src/main/java/com/apex/core/port/RetryPolicy.java|RetryPolicy.java]]**: Exponential backoff retry policy with jitter.
-- **[[../core-engine/src/main/java/com/apex/core/port/PlannerPort.java|PlannerPort.java]]**: Port abstraction for goal planning and step replanning.
-- **[[../core-engine/src/main/java/com/apex/core/port/ToolExecutorPort.java|ToolExecutorPort.java]]**: Boundary for tool execution.
-- **[[../core-engine/src/main/java/com/apex/core/port/ApprovalPort.java|ApprovalPort.java]]**: Human-in-the-loop authorization port.
-- **[[../core-engine/src/main/java/com/apex/core/port/StoragePort.java|StoragePort.java]]**: Key-value persistence port.
-- **[[../core-engine/src/main/java/com/apex/core/port/VectorStorePort.java|VectorStorePort.java]]**: Vector embeddings and semantic search port.
-- **[[../core-engine/src/main/java/com/apex/core/port/SecretsPort.java|SecretsPort.java]]**: Hardware-backed secret retrieval port.
-- **[[../core-engine/src/main/java/com/apex/core/port/AuditPort.java|AuditPort.java]]**: Tamper-evident cryptographic audit log port.
-- **[[../core-engine/src/main/java/com/apex/core/port/AuditStorePort.java|AuditStorePort.java]]**: Persistent storage boundary for audit trail verification.
-- **[[../core-engine/src/main/java/com/apex/core/port/JsonCodecPort.java|JsonCodecPort.java]]**: Port abstraction for pure JSON encoding/decoding.
-- **[[../core-engine/src/main/java/com/apex/core/port/TelemetryPort.java|TelemetryPort.java]]**: Telemetry metrics, spans, and structured log port.
-- **[[../core-engine/src/main/java/com/apex/core/port/NoOpTelemetry.java|NoOpTelemetry.java]]**: Zero-dependency default fallback telemetry port.
-- **[[../core-engine/src/main/java/com/apex/core/port/SafeTelemetryDecorator.java|SafeTelemetryDecorator.java]]**: Fault-isolating wrapper guaranteeing zero telemetry crashes (Constraint C9) and secret redaction.
-
-### Port Models (`com.apex.core.port.model`)
-- **[[../core-engine/src/main/java/com/apex/core/port/model/HttpRequest.java|HttpRequest.java]]**: Model representing outbound HTTP request headers and payload.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/HttpResponse.java|HttpResponse.java]]**: Model representing HTTP response status and retryable state.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/HttpChunk.java|HttpChunk.java]]**: Model representing SSE streaming chunks.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ChatDelta.java|ChatDelta.java]]**: Model representing streaming token deltas.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ChatRequest.java|ChatRequest.java]]**: Model representing chat prompt and parameters.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ChatResponse.java|ChatResponse.java]]**: Model representing generated output and tool calls.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ToolCall.java|ToolCall.java]]**: Model representing individual tool call requests.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ToolSchema.java|ToolSchema.java]]**: Model representing tool parameter validation schemas.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ExecutionResult.java|ExecutionResult.java]]**: Model representing tool execution results.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/Plan.java|Plan.java]]**: Model representing an agent plan.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/PlanStep.java|PlanStep.java]]**: Model representing plan steps.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ApprovalRequest.java|ApprovalRequest.java]]**: Model representing approval requests.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/ApprovalDecision.java|ApprovalDecision.java]]**: Model representing user approval decisions.
-- **[[../core-engine/src/main/java/com/apex/core/port/model/AuditRecord.java|AuditRecord.java]]**: Model representing tamper-evident hash-chained audit links.
-
-### In-Process Tool Execution (`com.apex.core.tool`)
-- **[[../core-engine/src/main/java/com/apex/core/tool/ToolWorker.java|ToolWorker.java]]**: In-process tool execution interface.
-- **[[../core-engine/src/main/java/com/apex/core/tool/ToolRegistry.java|ToolRegistry.java]]**: Concurrent tool worker registry on thread pool.
-
-### Provider Architecture (`com.apex.core.provider`)
-- **[[../core-engine/src/main/java/com/apex/core/provider/ProviderConfig.java|ProviderConfig.java]]**: Immutable provider settings model.
-- **[[../core-engine/src/main/java/com/apex/core/provider/ProviderRegistry.java|ProviderRegistry.java]]**: Central registry managing active providers with change listeners.
-- **[[../core-engine/src/main/java/com/apex/core/provider/ProviderConfigurationManager.java|ProviderConfigurationManager.java]]**: Core manager persisting provider settings via `StoragePort`.
-
-### Client & JSON Utilities (`com.apex.core.client`, `com.apex.core.json`)
-- **[[../core-engine/src/main/java/com/apex/core/client/OpenAiCompatibleClient.java|OpenAiCompatibleClient.java]]**: Pure HTTP client for OpenAI-compatible endpoints with `HttpTransportPort` and `streamChat`.
-- **[[../core-engine/src/main/java/com/apex/core/json/MiniJson.java|MiniJson.java]]**: Lightweight zero-dependency fallback JSON codec implementing `JsonCodecPort`.
-
-### Core Engine Tests (`core-engine/src/test/java`)
-- **[[../core-engine/src/test/java/com/apex/core/json/MiniJsonTest.java|MiniJsonTest.java]]**: Characterization tests for JSON formatting, escaping, and extraction.
-- **[[../core-engine/src/test/java/com/apex/core/port/model/ChatModelPortModelTest.java|ChatModelPortModelTest.java]]**: Port models immutability, defaults, and equals/hashCode contracts.
-- **[[../core-engine/src/test/java/com/apex/core/port/ApprovalPortContractTest.java|ApprovalPortContractTest.java]]**: Approval lifecycle contract test suite.
-- **[[../core-engine/src/test/java/com/apex/core/port/RetryPolicyTest.java|RetryPolicyTest.java]]**: Unit tests verifying exponential backoff calculations and jitter bounds.
-- **[[../core-engine/src/test/java/com/apex/core/port/SafeTelemetryDecoratorTest.java|SafeTelemetryDecoratorTest.java]]**: Fault isolation (Constraint C9) and secret redaction tests.
+Counts are per tracked file (`git ls-files`), excluding directories and files ignored by
+`.gitignore`.
 
 ---
 
-## 3. Module: `:security-interface` (Android Library)
-- **[[../security-interface/README.md|security-interface/README.md]]**: Technical overview of security policies, interlock, and audit trails.
-- **[[../security-interface/build.gradle.kts|security-interface/build.gradle.kts]]**: Android library Gradle build script.
-- **[[../security-interface/src/main/java/com/apex/security/policy/RiskLevel.java|RiskLevel.java]]**: RiskLevel enum (`L0`, `L1`, `L2`, `L3`, `L4`).
-- **[[../security-interface/src/main/java/com/apex/security/policy/ToolRiskRegistry.java|ToolRiskRegistry.java]]**: Tool risk level mapper with `L3` unknown tool default.
-- **[[../security-interface/src/main/java/com/apex/security/policy/BudgetExhaustedException.java|BudgetExhaustedException.java]]**: Exception thrown when tool iteration limits are exceeded.
-- **[[../security-interface/src/main/java/com/apex/security/audit/AuditChainBrokenException.java|AuditChainBrokenException.java]]**: Exception raised when audit hash chain breaks.
-- **[[../security-interface/src/main/java/com/apex/security/audit/FileAuditStore.java|FileAuditStore.java]]**: Durable `.jsonl` append-only audit store with `FileChannel.force(true)` and verification.
-- **[[../security-interface/src/main/java/com/apex/security/audit/AuditLogManager.java|AuditLogManager.java]]**: Tamper-evident SHA-256 hash-chained implementation of `AuditPort`.
-- **[[../security-interface/src/main/java/com/apex/security/interlock/SecurityInterlock.java|SecurityInterlock.java]]**: Fail-closed approval-interlock boundary gating tool execution.
-- **[[../security-interface/src/main/java/com/apex/security/interlock/ToolInvocationInterceptor.java|ToolInvocationInterceptor.java]]**: Interceptor emitting automated telemetry spans, logs, histograms, and counters.
+## 1. Root configuration and documentation
 
-### Security Interface Tests (`security-interface/src/test/java`)
-- **[[../security-interface/src/test/java/com/apex/security/policy/SecurityInterlockTest.java|SecurityInterlockTest.java]]**: Risk level gating, fail-closed handling, and approval delegation.
-- **[[../security-interface/src/test/java/com/apex/security/interlock/SecurityInterlockFailClosedTest.java|SecurityInterlockFailClosedTest.java]]**: Comprehensive fail-closed edge case tests.
-- **[[../security-interface/src/test/java/com/apex/security/interlock/ToolInvocationInterceptorTest.java|ToolInvocationInterceptorTest.java]]**: Automated metric and span emission tests.
-- **[[../security-interface/src/test/java/com/apex/security/audit/AuditLogManagerTest.java|AuditLogManagerTest.java]]**: Hash chain integrity and SHA-256 validation.
-- **[[../security-interface/src/test/java/com/apex/security/audit/FileAuditStoreTest.java|FileAuditStoreTest.java]]**: File persistence, fsync forcing, tampering detection, and rotation.
+| Path | Purpose |
+| :--- | :--- |
+| [README.md](../README.md) | Repository overview, module topology, build/test commands, provider presets, documentation map |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | Local setup, guardrail rules, pull request checklist |
+| [CHANGELOG.md](../CHANGELOG.md) | Release history in Keep-a-Changelog style |
+| [SECURITY.md](../SECURITY.md) | Vulnerability reporting policy |
+| [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | Contributor code of conduct |
+| [CODEOWNERS](../CODEOWNERS) | Review ownership per path |
+| [settings.gradle.kts](../settings.gradle.kts) | Multi-module inclusion of `:app`, `:core-engine`, `:security-interface` and repository declarations |
+| [build.gradle.kts](../build.gradle.kts) | Root build script: plugin aliases only |
+| [gradle.properties](../gradle.properties) | JVM and AndroidX build flags |
+| [metadata.json](../metadata.json) | AI Studio platform metadata (name, description, capabilities) |
+| [.env.example](../.env.example) | Template consumed by the Secrets Gradle plugin |
+| [.gitignore](../.gitignore) | Ignore rules for build output, local `.env` and IDE files |
 
----
+## 2. Documentation (`docs/`)
 
-## 4. Module: `:app` (Jetpack Compose Application)
-- **[[../app/README.md|app/README.md]]**: Technical overview of the Jetpack Compose app module.
-- **[[../app/build.gradle.kts|app/build.gradle.kts]]**: App module Gradle build script.
-- **[[../app/src/main/java/com/example/MainActivity.kt|MainActivity.kt]]**: Root activity launching edge-to-edge Compose UI.
+| Path | Purpose |
+| :--- | :--- |
+| [index.md](index.md) | Documentation home; entry point for every other document |
+| [architecture.md](architecture.md) | Modules, layering, ports and adapters, runtime flows, deviations |
+| [status.md](status.md) | Verified implementation status, unresolved references, tooling gaps |
+| [file_index.md](file_index.md) | This hub |
+| [file_index/core-engine.md](file_index/core-engine.md) | File index for `:core-engine` |
+| [file_index/security-interface.md](file_index/security-interface.md) | File index for `:security-interface` |
+| [file_index/app-module.md](file_index/app-module.md) | File index for `:app` |
+| [file_index/project-tooling.md](file_index/project-tooling.md) | File index for workflows, Gradle wrapper metadata, AI Studio assets |
+| [ci.md](ci.md) | CI pipeline steps and guardrails C1–C10 |
+| [testing.md](testing.md) | Test strategy and test inventory per module |
+| [e2e.md](e2e.md) | End-to-end harness, fixtures, how to add a scenario |
+| [networking.md](networking.md) | Transports, streaming, retries, timeouts, guardrail C6 |
+| [observability.md](observability.md) | Telemetry ports, signal names, redaction, fault isolation |
+| [monitoring.md](monitoring.md) | Metrics and logs to watch, current export status |
+| [scalability.md](scalability.md) | Budgets, pool sizes and limits |
+| [audit-format.md](audit-format.md) | Audit record schema, hash chain, rotation |
+| [versioning.md](versioning.md) | Version sources and release workflow behaviour |
+| [adr/README.md](adr/README.md) | ADR index |
+| [adr/0000-template.md](adr/0000-template.md) | ADR template |
+| [adr/0001-port-pattern.md](adr/0001-port-pattern.md) | Decision: ports and adapters boundary |
+| [adr/0002-json-codec.md](adr/0002-json-codec.md) | Decision: `JsonCodecPort` and `MiniJson` |
+| [adr/0003-core-engine-dependencies.md](adr/0003-core-engine-dependencies.md) | Decision: core-engine dependency policy |
+| [security/threat-model.md](security/threat-model.md) | Trust boundaries, threats T1–T5, mitigations |
+| [security/tool-adapters.md](security/tool-adapters.md) | Security checklist per tool adapter |
+| [runbooks/](runbooks/) | Six operational runbooks, listed in [index.md](index.md) |
 
-### Data & Provider Persistence (`com.example.data`)
-- **[[../app/src/main/java/com/example/data/model/Models.kt|Models.kt]]**: Room SQLite entities (AgentCard, ChatMessage, WorkspaceFile, Lorebook, ProviderConfig).
-- **[[../app/src/main/java/com/example/data/local/AppDatabase.kt|AppDatabase.kt]]**: Room Database and DAO interfaces.
-- **[[../app/src/main/java/com/example/data/provider/AndroidKeyStoreManager.kt|AndroidKeyStoreManager.kt]]**: Hardware-backed AES-256 GCM API key encryption.
-- **[[../app/src/main/java/com/example/data/provider/ProviderPresets.kt|ProviderPresets.kt]]**: Provider preset definitions including DeepSeek, OpenRouter, Groq, and Ollama.
-- **[[../app/src/main/java/com/example/data/provider/ProviderConfigurationManager.kt|ProviderConfigurationManager.kt]]**: DataStore preferences manager with live connection testing.
-- **[[../app/src/main/java/com/example/data/provider/DataStoreStorageAdapter.kt|DataStoreStorageAdapter.kt]]**: Adapter bridging core StoragePort to Android DataStore.
-- **[[../app/src/main/java/com/example/data/adapter/OrgJsonCodec.kt|OrgJsonCodec.kt]]**: Adapter implementing `JsonCodecPort` via Android's native `org.json`.
-- **[[../app/src/main/java/com/example/data/adapter/OkHttpTransport.kt|OkHttpTransport.kt]]**: Production OkHttp implementation of `HttpTransportPort`.
-- **[[../app/src/main/java/com/example/data/adapter/OtelTelemetry.kt|OtelTelemetry.kt]]**: Android Log-backed implementation of `TelemetryPort`.
-- **[[../app/src/main/java/com/example/ui/settings/ProviderConfigScreen.kt|ProviderConfigScreen.kt]]**: Dedicated Jetpack Compose provider configuration screen with Base URL, API Key, and Model ID editing.
+## 3. Modules
 
-### E2E Integration Tests (`app/src/test/java/com/example/e2e`)
-- **[[../app/src/test/java/com/example/e2e/AgentPipelineE2ETest.kt|AgentPipelineE2ETest.kt]]**: End-to-end integration tests using MockWebServer and frozen fixtures.
+- [`core-engine/`](file_index/core-engine.md) — pure Java 11 engine: 14 ports, 14 models, JSON codec,
+  OpenAI-compatible client, provider registry, tool registry, 6 test classes.
+- [`security-interface/`](file_index/security-interface.md) — risk policy, interlock, telemetry
+  interceptor, tamper-evident audit store, 5 test classes.
+- [`app/`](file_index/app-module.md) — Compose UI, Room, DataStore, WorkManager, OkHttp adapters,
+  10 tool workers, unit and instrumentation tests with LLM fixtures.
 
----
+## 4. How to keep this index accurate
 
-## 5. CI Automation & Architecture Documentation
-- **[[../.github/workflows/ci.yml|.github/workflows/ci.yml]]**: Automated CI workflow with guardrails C1–C8.
-- **[[adr/0002-json-codec.md|docs/adr/0002-json-codec.md]]**: ADR 0002 on `JsonCodecPort` and native `org.json` usage.
-- **[[audit-format.md|docs/audit-format.md]]**: Tamper-evident audit format specification and SHA-256 formulas.
-- **[[networking.md|docs/networking.md]]**: Networking architecture, timeouts, retry policies, and SSE streaming.
-- **[[observability.md|docs/observability.md]]**: Observability, signal taxonomy, and `SafeTelemetryDecorator` fault isolation.
-- **[[security/threat-model.md|docs/security/threat-model.md]]**: Threat model, trust boundaries, threats T1–T5, and mitigations.
-- **[[security/tool-adapters.md|docs/security/tool-adapters.md]]**: Security checklist for tool adapters.
-- **[[e2e.md|docs/e2e.md]]**: End-to-end integration test guide.
-- **[[testing.md|docs/testing.md]]**: Testing strategy and test suite documentation.
-- **[[ci.md|docs/ci.md]]**: CI pipeline specification and architectural guardrail enforcement.
-
-
+1. Add a row when you add a tracked file, in the part that owns that directory.
+2. Update the count in the table above when a part grows.
+3. Run `git ls-files` and compare with the parts; the totals must match.

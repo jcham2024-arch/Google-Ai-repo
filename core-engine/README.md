@@ -1,57 +1,69 @@
 # `:core-engine` — Pure Java 11 Headless Engine
 
-The `:core-engine` module is a zero-dependency, headless Java library containing the agentic reasoning abstractions, tool execution registry, and the **Nine Port Interfaces**.
+A `java-library` module with no runtime dependencies. The only declared dependency is
+`testImplementation(libs.junit)`. The allow-list referenced by ADR 0003 and guardrail C1 lives in
+[`allowed-deps.txt`](allowed-deps.txt).
 
----
+## Principles
 
-## Architectural Principles
+1. **Zero runtime dependencies.** `implementation(...)` must never appear in
+   [`build.gradle.kts`](build.gradle.kts); CI fails the build if it does (guardrail C1).
+2. **Java 11 bytecode.** `sourceCompatibility`/`targetCompatibility` are `VERSION_11`. Records,
+   pattern matching and virtual threads are forbidden so the code stays compatible with Android ART on
+   `minSdk 24`.
+3. **Ports and adapters.** Orchestration depends only on interfaces in `com.apex.core.port`; Android
+   and vendor specifics live in `:security-interface` and `:app`.
 
-1. **Zero External Dependencies**: The runtime classpath consists strictly of `java.base`. No Jackson, no Gson, no OkHttp, no Retrofit, and no Android framework APIs.
-2. **Java 11 Bytecode**: Targeted specifically at Java 11 (`sourceCompatibility = JavaVersion.VERSION_11`). Java 16+ records, pattern matching, and virtual threads (`Thread.ofVirtual`) are prohibited to guarantee compatibility with Android ART on API 24+.
-3. **Hexagonal Architecture (Ports and Adapters)**: High-level agent orchestration depends solely on interfaces defined in `com.apex.core.port`.
+## Port interfaces (14)
 
----
-
-## The Nine Port Interfaces
-
-| Port Interface | Description | Target Implementation |
+| Port | Purpose | Used by |
 | :--- | :--- | :--- |
-| `ChatModelPort` | Abstraction for LLM completion and streaming. | `OpenAiCompatibleClient` |
-| `PlannerPort` | Creates and replans hierarchical goals and execution steps. | In-process ReAct planner |
-| `ToolExecutorPort` | Boundary for dispatching tool calls to executable workers. | Gated by `:security-interface` |
-| `ApprovalPort` | Human-in-the-loop authorization gate. | UI ModalBottomSheet in `:app` |
-| `StoragePort` | Key-value persistence for session contexts and states. | Room SQLite / File store |
-| `VectorStorePort` | Vector embedding storage and nearest-neighbor search. | In-memory / SQLite vector |
-| `SecretsPort` | Retrieval and storage of sensitive credentials. | Android Keystore |
-| `AuditPort` | Cryptographic append-only trail of tool executions. | Hash-chained audit logger |
-| `TelemetryPort` | Performance metrics and tracing. | Android Logcat / Diagnostics |
+| `ChatModelPort` | Chat completion and streaming | `OpenAiCompatibleClient` |
+| `PlannerPort` | Goal planning and replanning | `:app` orchestration |
+| `ToolExecutorPort` | Tool dispatch boundary | `SecurityInterlock`, `ToolInvocationInterceptor` |
+| `ApprovalPort` | Human approval gate | `AndroidApprovalPort` |
+| `StoragePort` | Key-value persistence | `DataStoreStorageAdapter` |
+| `VectorStorePort` | Vector storage and search | `:app` memory features |
+| `SecretsPort` | Credential storage | `AndroidKeyStoreManager` |
+| `TelemetryPort` | Spans, counters, histograms, logs | `OtelTelemetry`, `NoOpTelemetry`, `SafeTelemetryDecorator` |
+| `AuditPort` | Audit record sink | `AuditLogManager` |
+| `AuditStorePort` | Audit read/verify surface | `FileAuditStore` |
+| `HttpTransportPort` | Buffered and streaming HTTP | `OkHttpTransport` |
+| `JsonCodecPort` | JSON encode/decode | `OrgJsonCodec` |
+| `RateLimiterPort` | Request throttling | `TokenBucketRateLimiter` |
+| `ChunkConsumer` | Streaming chunk callback | `OkHttpTransport.stream(...)` |
 
----
+Helper types in the same package: `RetryPolicy` (attempts, exponential delay with jitter),
+`NoOpTelemetry`, `SafeTelemetryDecorator` (fault isolation plus key-based redaction).
 
-## Models & Java 11 Adaptation
+## Port models (14)
 
-To comply with Java 11 constraints on Android, all port models are implemented as immutable `final` classes:
+`ApprovalDecision`, `ApprovalRequest`, `AuditRecord`, `ChatDelta`, `ChatRequest`, `ChatResponse`,
+`ExecutionResult`, `HttpChunk`, `HttpRequest`, `HttpResponse`, `Plan`, `PlanStep`, `ToolCall`,
+`ToolSchema` — all immutable classes with null-safe constructors.
 
-- **`ChatRequest`**: Contains prompt, system instruction, model name, and tool declarations.
-- **`ChatResponse`**: Contains generated text, model, status, and detected tool calls.
-- **`ToolCall`**: Contains tool ID, tool name, and key-value arguments map.
-- **`ExecutionResult`**: Contains execution status, textual output, and error messages.
-- **`Plan` & `PlanStep`**: Represents multi-step agent plans and step completion status.
-- **`ApprovalRequest` & `ApprovalDecision`**: Encapsulates approval queries, risk level, and user choices.
-- **`AuditRecord`**: Immutable record storing timestamps, tool names, risk levels, decisions, and SHA-256 hashes.
+## Other packages
 
----
+| Package | Contents |
+| :--- | :--- |
+| `client` | `OpenAiCompatibleClient` — chat and streaming against any OpenAI-compatible endpoint, built strictly on `HttpTransportPort` and `JsonCodecPort` |
+| `json` | `MiniJson` — dependency-free JSON reader/writer; guardrail C4 keeps it inside this module |
+| `provider` | `ProviderConfig`, `ProviderConfigurationManager`, `ProviderEngineContext`, `ProviderRegistry` |
+| `tool` | `ToolRegistry` and the `ToolWorker` contract (`getName`, `getDescription`, `execute(Map<String,String>)`) implemented by `:app` |
 
-## In-Process Tool Execution (`com.apex.core.tool`)
+## Tests
 
-Desktop engines frequently rely on `ProcessBuilder` or shell commands to execute tools. On standard Android devices, spawning arbitrary sub-processes is restricted. `:core-engine` replaces process forks with an in-process worker model:
+Six classes, 24 test methods: `MiniJsonTest`, `ApprovalPortContractTest`, `RetryPolicyTest`,
+`SafeTelemetryDecoratorTest`, `ChatModelPortModelTest`, `ProviderConfigurationManagerTest`.
 
-- **`ToolWorker`**: Java interface defining `getName()`, `getDescription()`, and `execute(Map<String, String>)`.
-- **`ToolRegistry`**: Thread-safe registry that invokes `ToolWorker` instances concurrently on an `ExecutorService` using cooperative cancellation.
+```bash
+gradle :core-engine:test
+```
 
----
+## Local invariant checks
 
-## Network Transport & MiniJson
-
-- **`OpenAiCompatibleClient`**: Uses standard `java.net.HttpURLConnection` to dispatch requests to `/chat/completions`. Handles timeouts, authorization headers, and status code verification without third-party HTTP clients.
-- **`MiniJson`**: A lightweight, hand-rolled JSON serializer and parser designed for zero-allocation JSON extraction and formatting.
+```bash
+grep -E '^\s*implementation\(' core-engine/build.gradle.kts   # expect no output
+grep -rn "import android\." core-engine/src/main/              # expect no output
+grep -rn "record " core-engine/src/                            # Java 11 rule
+```

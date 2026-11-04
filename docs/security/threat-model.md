@@ -1,61 +1,96 @@
-# Threat Model & Security Architecture
+# Threat Model
 
-## Overview
-This document defines the threat model for Apex Agent Management Chat. Model outputs and external inputs are treated as untrusted data boundaries.
+Model output and network responses are untrusted inputs. Every tool call they produce crosses a
+validation boundary before it can touch device state.
 
-## Trust Boundaries Diagram
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       UNTRUSTED ZONE                            │
-│  ┌───────────────────────┐         ┌─────────────────────────┐  │
-│  │ Model Generated Text  │         │ External Network Stream │  │
-│  └───────────┬───────────┘         └────────────┬────────────┘  │
-└──────────────┼──────────────────────────────────┼───────────────┘
-               │ Tool Calls                       │ HTTP Responses
-               ▼                                  ▼
-═══════════════╧══════════════════════════════════╧═════════════════ TRUST BOUNDARY
-               │ Validation & Risk Interlock Gate
-               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         TRUSTED ZONE                            │
-│  ┌───────────────────────┐         ┌─────────────────────────┐  │
-│  │   SecurityInterlock   │ ──────► │ Cryptographic Audit Log │  │
-│  │  (Fail-Closed L0-L4)  │         │  (.jsonl SHA256 Chain)  │  │
-│  └───────────┬───────────┘         └─────────────────────────┘  │
-│              │ Executed Tool                                    │
-│              ▼                                                  │
-│  ┌───────────────────────┐                                      │
-│  │   In-Process Tool     │                                      │
-│  └───────────────────────┘                                      │
-└─────────────────────────────────────────────────────────────────┘
+        UNTRUSTED                          TRUSTED
+  ┌────────────────────┐            ┌──────────────────────────────┐
+  │ model text / tool  │  tool call │  SecurityInterlock           │
+  │ calls              │───────────▶│  risk lookup (L0–L4)         │
+  ├────────────────────┤            │  approval gate for L3/L4     │
+  │ external HTTP      │  response  │  budget + kill switch        │
+  │ responses          │───────────▶│  ToolWorker execution        │
+  └────────────────────┘            │  audit append (SHA-256 chain)│
+                                    └──────────────────────────────┘
 ```
 
-## Enumerated Threats & Mitigations
+## Enumerated threats
 
-### T1: Prompt Injection leading to Unauthorized Tool Escalation
-- **Threat**: Adversarial prompt content attempts to trick the model into executing high-risk tools (`run_command`, `write_file_external`).
-- **Mitigation**: `SecurityInterlock` evaluates `RiskLevel` independently of model claims. High-risk tools (`L3` and `L4`) require explicit user confirmation via `ApprovalPort`.
-- **Test**: `SecurityInterlockTest.testL4ToolFailsWhenUserRejects()`.
+### T1 — Prompt injection escalating to privileged tools
 
-### T2: Malicious Argument Injection into Tool Inputs
-- **Threat**: Model outputs argument payloads containing malformed or missing fields to trigger unhandled tool crashes.
-- **Mitigation**: `ToolSchema` mandates required parameter presence before tool execution. Malformed payloads are rejected immediately.
-- **Test**: `SecurityInterlockFailClosedTest.testNullToolCallIsDenied()`.
+- Threat: crafted prompt content convinces the model to call `run_command` or `write_file_external`.
+- Mitigation: the risk decision comes from `ToolRiskRegistry`, never from the model. `L3` and `L4`
+  calls require an approving `ApprovalDecision` whose request id matches the request; a mismatch, a
+  null decision or a throwing approval port all deny the call.
+- Verified by: `SecurityInterlockTest.testL4ToolRequiresApprovalAndExecutesWhenApproved`,
+  `testL4ToolFailsWhenUserRejects`, `testUnknownToolFailsClosedToL3`,
+  `SecurityInterlockFailClosedTest.testMismatchedRequestIdIsDenied`.
 
-### T3: Audit Trail Tampering or Record Truncation
-- **Threat**: An attacker modifies historical audit records on disk to conceal unauthorized tool calls.
-- **Mitigation**: Every record is cryptographically bound using SHA-256 hash chaining against the preceding entry and `FileChannel.force(true)` fsync. Any discrepancy breaks `verify()`.
-- **Test**: `FileAuditStoreTest.testTamperingDetection()`.
+### T2 — Malformed tool arguments crashing execution
 
-### T4: Secret Exfiltration via Telemetry or Logs
-- **Threat**: API keys, bearer tokens, or user passwords leak into log files or telemetry streams.
-- **Mitigation**: `SafeTelemetryDecorator` redacts key names matching `(?i).*(token|secret|key|password).*`.
-- **Test**: `SafeTelemetryDecoratorTest.testSecretRedaction()`.
+- Threat: the model emits calls with missing or wrong-typed arguments.
+- Mitigation: the interlock rejects null/empty tool names (`DENIED_MALFORMED`) and unknown tool names
+  (`ERROR_NOT_FOUND`), and every worker throws `IllegalArgumentException` for a missing required
+  argument; worker exceptions become `ERROR_THROWN` results rather than crashes.
+- Caveat: `ToolSchema` exists as a model, but no validation pass over arguments is performed anywhere
+  in the code, so a present-but-wrong argument reaches the worker.
+- Verified by: `SecurityInterlockFailClosedTest.testNullToolCallIsDenied`,
+  `SecurityInterlockTest.testToolExceptionHandledGracefully`.
 
-### T5: Denial of Service via Unbounded Tool Execution Loops
-- **Threat**: An agent loops infinitely issuing tool calls.
-- **Mitigation**: `SecurityInterlock` enforces `maxToolIterations` (default 10). Exceeding the limit throws `BudgetExhaustedException`.
-- **Test**: `SecurityInterlockFailClosedTest.testExceedingMaxIterationsThrowsBudgetExhaustedException()`.
+### T3 — Audit trail tampering
 
-## Residual Risks
-- **Hardware Compromise**: Root access to physical device storage permits raw file modification. Mitigated by hardware-backed Android KeyStore encryption for API keys.
+- Threat: rewriting or truncating history to hide an execution.
+- Mitigation: each record commits to the previous entry hash (SHA-256 chain over
+  `timestamp:toolName:riskLevel:decision:argsHash:previousHash`); `FileAuditStore.verify()` returns
+  the index of the first inconsistent record and `AuditChainBrokenException` reports it. Writes are
+  fsynced.
+- Caveat: the chain is not signed or keyed, so an attacker who can rewrite the whole file can
+  recompute a valid chain. Production code currently constructs `AuditLogManager()` without a store,
+  so records are in memory only (see [../status.md](../status.md)).
+- Verified by: `FileAuditStoreTest.testTamperingDetection`, `testMismatchedPrevHashThrowsException`,
+  `AuditLogManagerTest.testSequentialHashChainLinking`.
+
+### T4 — Secret exfiltration through telemetry
+
+- Threat: API keys or tokens appear in logs or spans.
+- Mitigation: `SafeTelemetryDecorator` replaces values of any attribute or log field whose key
+  matches `(?i).*(token|secret|key|password).*` with `[REDACTED]`, and swallows telemetry failures so
+  they cannot change control flow.
+- Verified by: `SafeTelemetryDecoratorTest.testSecretRedaction`,
+  `testThrowingDelegateDoesNotCrashCaller`.
+
+### T5 — Unbounded tool loops (denial of service)
+
+- Threat: an agent issues tool calls forever.
+- Mitigation: `SecurityInterlock` enforces `DEFAULT_MAX_ITERATIONS = 10` per conversation, records
+  `DENIED_BUDGET_EXHAUSTED` and throws `BudgetExhaustedException`; a kill switch
+  (`toolsPaused`) denies execution with `DENIED_TOOLS_PAUSED`.
+- Verified by: `SecurityInterlockFailClosedTest.testExceedingMaxIterationsThrowsBudgetExhaustedException`.
+
+### T6 — Path traversal in file tools
+
+- Threat: a model supplies `../../databases/app.db` to read or overwrite data outside the sandbox.
+- Mitigation: `FileGovernanceEngine.validatePath` rejects absolute paths, any `..` segment, and
+  canonical paths that escape the sandbox root before writing, restoring or deleting.
+- Caveat: `ReadFileToolWorker` and `ReadFileRangeToolWorker` resolve `File(baseDir, path)` directly
+  with no validation, so their safety depends entirely on the `baseDir` passed at construction.
+  Read-tool exposure is therefore unverified.
+- Verified by: no automated test covers path traversal.
+
+## Residual risks
+
+| Risk | Status |
+| :--- | :--- |
+| Device compromise (root, unlocked bootloader) | Audit files and DataStore are readable/modifiable; API keys remain Keystore-encrypted, but a root attacker can call `decrypt` through the app process |
+| Unsigned audit chain | Recomputable by anyone who can rewrite the whole file |
+| In-memory audit in production | No durable record between app launches |
+| `run_command` | Currently returns a formatted string and executes nothing, so its `L4` gating protects a stub; when it becomes real, the risk level must stay `L4` |
+| Telemetry has no durable sink | Evidence of an incident can be lost with the process |
+| Debug signing key in repository | `debug.keystore` is committed; debug APKs are not trustworthy artifacts |
+| Firebase credentials | AppCheck/Firestore/Auth flows are unverified in this environment |
+
+## Not in scope
+
+Server-side compromise of a model provider, supply-chain attacks on Gradle dependencies, and physical
+attacks requiring an unlocked device with developer options are outside this model.
