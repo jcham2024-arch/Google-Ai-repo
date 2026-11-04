@@ -19,14 +19,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.apex.core.port.model.ToolCall
+import com.apex.core.tool.ToolRegistry
+import com.apex.security.audit.AuditLogManager
+import com.apex.security.interlock.SecurityInterlock
+import com.apex.security.policy.RiskLevel
+import com.apex.security.policy.ToolRiskRegistry
 import com.example.data.local.AppDatabase
 import com.example.data.model.ChatMessage
 import com.example.data.provider.ProviderConfigurationManager
 import com.example.domain.engine.AgentOrchestrator
+import com.example.domain.engine.AndroidApprovalPort
 import com.example.domain.engine.ProviderRegistry
 import com.example.domain.gateway.UniversalAIGatewayImpl
 import com.example.domain.repository.ChatRepositoryImpl
 import com.example.domain.sync.OfflineSyncManager
+import com.example.domain.tools.HttpGetToolWorker
+import com.example.domain.tools.HttpPostToolWorker
+import com.example.domain.tools.ReadFileToolWorker
+import com.example.domain.tools.RunCommandToolWorker
 import com.example.domain.usecase.ApproveToolUseCase
 import com.example.domain.usecase.SendMessageUseCase
 
@@ -304,16 +314,40 @@ fun rememberChatViewModel(): ChatViewModel {
         val configManager = ProviderConfigurationManager(context)
         val providerRegistry = ProviderRegistry(configManager, coroutineScope)
         val gateway = UniversalAIGatewayImpl(context)
-        val agentOrchestrator = AgentOrchestrator(providerRegistry, gateway)
+
+        val toolRegistry = ToolRegistry()
+        toolRegistry.register(ReadFileToolWorker(context.filesDir))
+        toolRegistry.register(HttpGetToolWorker())
+        toolRegistry.register(HttpPostToolWorker())
+        toolRegistry.register(RunCommandToolWorker())
+
+        val riskRegistry = ToolRiskRegistry()
+        riskRegistry.registerRisk("read_file", RiskLevel.L1)
+        riskRegistry.registerRisk("http_get", RiskLevel.L2)
+        riskRegistry.registerRisk("http_post", RiskLevel.L3)
+        riskRegistry.registerRisk("run_command", RiskLevel.L4)
+
+        val auditLogManager = AuditLogManager()
+
+        var viewModelRef: ChatViewModel? = null
+        val approvalPort = AndroidApprovalPort { request ->
+            viewModelRef?.showApprovalDialog(request)
+        }
+        val securityInterlock = com.apex.security.interlock.SecurityInterlock(toolRegistry, riskRegistry, auditLogManager, approvalPort)
+        val agentOrchestrator = AgentOrchestrator(providerRegistry, gateway, toolRegistry, securityInterlock)
+
         val chatRepository = ChatRepositoryImpl(apexDao, agentOrchestrator)
         val offlineSyncManager = OfflineSyncManager(offlineQueueDao, agentOrchestrator, coroutineScope)
         val sendMessageUseCase = SendMessageUseCase(chatRepository, offlineSyncManager)
         val approveToolUseCase = ApproveToolUseCase(chatRepository)
-        ChatViewModel(
+        val viewModel = ChatViewModel(
             chatRepository = chatRepository,
             sendMessageUseCase = sendMessageUseCase,
             approveToolUseCase = approveToolUseCase,
-            offlineSyncManager = offlineSyncManager
+            offlineSyncManager = offlineSyncManager,
+            approvalPort = approvalPort
         )
+        viewModelRef = viewModel
+        viewModel
     }
 }

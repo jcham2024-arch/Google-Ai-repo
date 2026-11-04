@@ -2,7 +2,9 @@ package com.example.ui.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.apex.core.port.model.ApprovalRequest
 import com.apex.core.port.model.ToolCall
+import com.example.domain.engine.AndroidApprovalPort
 import com.example.domain.repository.ChatRepository
 import com.example.domain.sync.OfflineSyncManager
 import com.example.domain.usecase.ApproveToolUseCase
@@ -19,7 +21,8 @@ class ChatViewModel(
     private val sendMessageUseCase: SendMessageUseCase,
     private val approveToolUseCase: ApproveToolUseCase,
     private val offlineSyncManager: OfflineSyncManager? = null,
-    val chatId: String = "default"
+    val chatId: String = "default",
+    private val approvalPort: AndroidApprovalPort? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -51,6 +54,20 @@ class ChatViewModel(
         }
     }
 
+    fun showApprovalDialog(request: ApprovalRequest) {
+        _uiState.update { state ->
+            state.copy(
+                pendingToolApproval = ToolApprovalUiState(
+                    requestId = request.requestId,
+                    toolName = request.toolName,
+                    arguments = request.arguments,
+                    riskLevel = request.riskLevel,
+                    reason = request.reason
+                )
+            )
+        }
+    }
+
     fun sendMessage(content: String, systemInstruction: String = "You are Apex Agent, a general-purpose AI assistant.") {
         if (content.isBlank()) return
         _uiState.update { it.copy(isGenerating = true, errorMessage = null) }
@@ -73,6 +90,7 @@ class ChatViewModel(
 
     fun handleToolApproval(requestId: String, toolCall: ToolCall, isApproved: Boolean) {
         viewModelScope.launch {
+            approvalPort?.provideDecision(requestId, isApproved, if (isApproved) "Approved by user" else "Denied by user")
             val result = approveToolUseCase(requestId, toolCall, isApproved)
             _uiState.update { state ->
                 val newSteps = state.agentSteps + AgentExecutionStep(

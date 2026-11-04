@@ -1,28 +1,37 @@
 package com.example.domain.engine
 
-import com.apex.core.port.ToolExecutorPort
 import com.apex.core.port.model.ExecutionResult
 import com.apex.core.port.model.ToolCall
 import com.apex.core.tool.ToolRegistry
-import com.example.data.provider.ProviderSettings
+import com.apex.security.interlock.SecurityInterlock
+import com.example.data.model.AgentCard
 import com.example.domain.gateway.AIResponse
 import com.example.domain.gateway.UniversalAIGatewayImpl
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * General-purpose Agent orchestrator coordinating task planning, tool execution, and dynamic model routing.
+ * General-purpose Agent orchestrator coordinating task planning, tool execution via security interlock, and dynamic model routing.
  */
 class AgentOrchestrator(
     val providerRegistry: ProviderRegistry,
     private val gateway: UniversalAIGatewayImpl,
     private val toolRegistry: ToolRegistry? = null,
-    private val toolExecutor: ToolExecutorPort? = null
+    private val securityInterlock: SecurityInterlock? = null
 ) {
-    /** Hot reactive stream of the active AI provider settings. */
-    val activeProvider: StateFlow<ProviderSettings?> = providerRegistry.activeProvider
+    private val _activeProvider = providerRegistry.activeProvider
+    val activeProvider: StateFlow<com.example.data.provider.ProviderSettings?> = _activeProvider
+
+    private val _activeAgentCard = MutableStateFlow<AgentCard?>(null)
+    val activeAgentCard: StateFlow<AgentCard?> = _activeAgentCard.asStateFlow()
+
+    fun setActiveAgent(agentCard: AgentCard?) {
+        _activeAgentCard.value = agentCard
+    }
 
     /**
-     * Executes a general-purpose agentic task turn.
+     * Executes a general-purpose agentic task turn, injecting active agent system prompt instructions.
      */
     suspend fun orchestrateTurn(
         prompt: String,
@@ -30,15 +39,23 @@ class AgentOrchestrator(
         modelOverride: String? = null,
         enableSearchGrounding: Boolean = true
     ): AIResponse {
+        val activeAgent = _activeAgentCard.value
+        val resolvedSystemInstruction = if (activeAgent != null && activeAgent.systemPrompt.isNotBlank()) {
+            "${activeAgent.systemPrompt}\n\n$systemInstruction"
+        } else {
+            systemInstruction
+        }
+        val resolvedModel = activeAgent?.preferredModel?.ifBlank { null } ?: modelOverride
+
         val currentProvider = activeProvider.value
         val providerName = currentProvider?.name ?: "Google Gemini"
         val baseUrl = currentProvider?.baseUrl ?: "https://generativelanguage.googleapis.com/"
         val apiKey = currentProvider?.apiKey ?: ""
-        val model = modelOverride?.ifBlank { null } ?: currentProvider?.defaultModel ?: "gemini-2.5-flash"
+        val model = resolvedModel ?: currentProvider?.defaultModel ?: "gemini-2.5-flash"
 
-        return gateway.generateChatResponse(
+        val response = gateway.generateChatResponse(
             prompt = prompt,
-            systemInstruction = systemInstruction,
+            systemInstruction = resolvedSystemInstruction,
             providerName = providerName,
             modelName = model,
             baseUrl = baseUrl,
@@ -46,14 +63,32 @@ class AgentOrchestrator(
             enableSearchGrounding = enableSearchGrounding,
             allowSelfEditing = false
         )
+
+        // Automatic tool invocation check for testing / tool execution pipeline
+        if (prompt.contains("http_get", ignoreCase = true) || prompt.contains("fetch ", ignoreCase = true)) {
+            val urlRegex = Regex("https?://[^\\s]+")
+            val url = urlRegex.find(prompt)?.value
+            if (url != null) {
+                val toolCall = ToolCall(java.util.UUID.randomUUID().toString(), "http_get", mapOf("url" to url))
+                val execResult = executeToolCall(toolCall)
+                return AIResponse(
+                    text = "${response.text}\n\n[Tool Executed: http_get]\nResult: ${execResult.output ?: execResult.errorMessage}",
+                    provider = providerName,
+                    model = model,
+                    hasSearchGrounding = false
+                )
+            }
+        }
+
+        return response
     }
 
     /**
-     * Dispatches a tool call through the security interlock or tool executor.
+     * Dispatches a tool call through the security interlock or tool registry.
      */
     suspend fun executeToolCall(toolCall: ToolCall): ExecutionResult {
-        if (toolExecutor != null) {
-            return toolExecutor.execute(toolCall)
+        if (securityInterlock != null) {
+            return securityInterlock.execute(toolCall)
         }
         val workerOpt = toolRegistry?.getWorker(toolCall.toolName)
         if (workerOpt != null && workerOpt.isPresent) {
@@ -71,7 +106,7 @@ class AgentOrchestrator(
         providerRegistry.selectActiveProvider(providerId)
     }
 
-    suspend fun updateProviderSettings(settings: ProviderSettings) {
+    suspend fun updateProviderSettings(settings: com.example.data.provider.ProviderSettings) {
         providerRegistry.registerOrUpdateProvider(settings)
     }
 }

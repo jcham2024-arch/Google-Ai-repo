@@ -55,7 +55,7 @@ interface ApexDao {
     suspend fun updateNarratorSettings(provider: String, model: String, systemPrompt: String)
 }
 
-@Database(entities = [AgentCard::class, ChatMessage::class, WorkspaceFile::class, Lorebook::class, ProviderConfig::class, PendingActionEntity::class], version = 3, exportSchema = false)
+@Database(entities = [AgentCard::class, ChatMessage::class, WorkspaceFile::class, Lorebook::class, ProviderConfig::class, PendingActionEntity::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun apexDao(): ApexDao
     abstract fun offlineQueueDao(): OfflineQueueDao

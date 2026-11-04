@@ -95,7 +95,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
 
         if (resolvedKey.isBlank()) {
             return AIResponse(
-                text = "Apex Narrator AI Gateway [Offline / Unconfigured Mode]: Gemini API Key is not set in Secrets. Using active refreshed model ($modelName). Processed request: '$prompt'",
+                text = "Apex Agent AI Gateway [Offline / Unconfigured Mode]: Gemini API Key is not set in Secrets. Using active refreshed model ($modelName). Processed request: '$prompt'",
                 provider = providerName,
                 model = modelName,
                 hasSearchGrounding = false,
@@ -158,7 +158,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
 
                 var fileEdit: String? = null
                 if (allowSelfEditing && (prompt.contains("edit code", ignoreCase = true) || prompt.contains("refactor", ignoreCase = true))) {
-                    fileEdit = "// Refreshed Narrator self-edit update\n// Task: $prompt\nfun executeRefreshedLogic() {\n    // Code optimized via $modelName\n}"
+                    fileEdit = "// Refreshed Agent self-edit update\n// Task: $prompt\nfun executeRefreshedLogic() {\n    // Code optimized via $modelName\n}"
                 }
 
                 return AIResponse(
@@ -171,7 +171,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
             }
         } catch (e: Exception) {
             return AIResponse(
-                text = "Apex Narrator Gateway Error: ${e.localizedMessage ?: "Network error"}",
+                text = "Apex Agent Gateway Error: ${e.localizedMessage ?: "Network error"}",
                 provider = providerName,
                 model = modelName,
                 hasSearchGrounding = false,
@@ -241,7 +241,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
 
                 var fileEdit: String? = null
                 if (allowSelfEditing && (prompt.contains("edit code", ignoreCase = true) || prompt.contains("refactor", ignoreCase = true))) {
-                    fileEdit = "// Refreshed Narrator self-edit update via $providerName\n// Task: $prompt\nfun executeRefreshedLogic() {\n    // Code optimized via $modelName\n}"
+                    fileEdit = "// Refreshed Agent self-edit update via $providerName\n// Task: $prompt\nfun executeRefreshedLogic() {\n    // Code optimized via $modelName\n}"
                 }
 
                 return AIResponse(
@@ -254,7 +254,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
             }
         } catch (e: Exception) {
             return AIResponse(
-                text = "Apex Narrator Gateway Error ($providerName / $modelName): ${e.localizedMessage ?: "Connection error"}. Ensure Base URL is reachable.",
+                text = "Apex Agent Gateway Error ($providerName / $modelName): ${e.localizedMessage ?: "Connection error"}. Ensure Base URL is reachable.",
                 provider = providerName,
                 model = modelName,
                 hasSearchGrounding = false

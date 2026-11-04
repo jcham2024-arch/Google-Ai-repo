@@ -13,6 +13,7 @@ data class AgentCard(
     val preferredModel: String,
     val toolsJson: String = "[]",
     val isNarrator: Boolean = false,
+    val isMasterAgent: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
 
