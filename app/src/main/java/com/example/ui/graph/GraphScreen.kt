@@ -17,7 +17,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CenterFocusWeak
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Input
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.*
@@ -43,28 +47,32 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.reflect.TypeToken
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 data class NodePort(
     val id: String,
     val name: String,
-    val dataType: String, // e.g. "Prompt", "ScratchpadRef", "CodeDiff", "Status"
+    val dataType: String,
     val isInput: Boolean
 )
 
 data class GraphNodeData(
     val id: String,
-    var position: Offset, // Canvas X, Y
+    var position: Offset,
     val name: String,
     val role: String,
-    val status: String, // IDLE, RUNNING, DONE, FAILED
+    val status: String,
     val toolsCount: Int,
     val permissionLevel: String,
     val inputs: List<NodePort>,
@@ -81,23 +89,52 @@ data class PipelineEdge(
     var isActive: Boolean = true
 )
 
+data class SerializedNode(
+    val id: String,
+    val posX: Float,
+    val posY: Float,
+    val name: String,
+    val role: String,
+    val status: String,
+    val toolsCount: Int,
+    val permissionLevel: String,
+    val inputs: List<NodePort>,
+    val outputs: List<NodePort>
+)
+
+data class SerializedPipelineGraph(
+    val version: Int = 1,
+    val name: String = "Swarm Pipeline",
+    val createdAt: Long = System.currentTimeMillis(),
+    val nodes: List<SerializedNode>,
+    val pipelines: List<PipelineEdge>
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GraphScreen() {
     var isExecutionView by remember { mutableStateOf(true) }
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Canvas View, 1: Scratchpad Inspector
+    var selectedTab by remember { mutableIntStateOf(0) }
     var isSwarmPaused by remember { mutableStateOf(false) }
     var selectedNodeId by remember { mutableStateOf<String?>("node_orchestrator") }
 
-    // Canvas Pan & Pinch-to-Zoom states (Compose Transformation API)
+    // Dialog state for Export / Import JSON
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var importJsonInput by remember { mutableStateOf("") }
+    var importErrorMessage by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+
+    // Canvas Pan & Zoom states
     var panOffset by remember { mutableStateOf(Offset(0f, 0f)) }
     var zoomScale by remember { mutableFloatStateOf(1.0f) }
 
-    // Interactive Node Connection Authoring State
+    // Interactive Connection State
     var activeSourcePort by remember { mutableStateOf<Pair<String, String>?>(null) }
     var draftTargetPos by remember { mutableStateOf<Offset?>(null) }
 
-    // Initial Node Graph Layout
+    // Initial Node Graph
     val nodes = remember {
         mutableStateListOf(
             GraphNodeData(
@@ -177,7 +214,6 @@ fun GraphScreen() {
 
     val density = LocalDensity.current
 
-    // Infinite animation for pipeline flow lines
     val infiniteTransition = rememberInfiniteTransition(label = "pipeline_flow")
     val phaseAnim by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -188,6 +224,54 @@ fun GraphScreen() {
         ),
         label = "phase"
     )
+
+    // Helper to load serialized graph
+    fun loadGraphFromSerialized(serialized: SerializedPipelineGraph) {
+        nodes.clear()
+        pipelines.clear()
+        serialized.nodes.forEach { sNode ->
+            nodes.add(
+                GraphNodeData(
+                    id = sNode.id,
+                    position = Offset(sNode.posX, sNode.posY),
+                    name = sNode.name,
+                    role = sNode.role,
+                    status = sNode.status,
+                    toolsCount = sNode.toolsCount,
+                    permissionLevel = sNode.permissionLevel,
+                    inputs = sNode.inputs,
+                    outputs = sNode.outputs
+                )
+            )
+        }
+        pipelines.addAll(serialized.pipelines)
+    }
+
+    // Helper to generate current JSON
+    fun exportCurrentGraphJson(): String {
+        val serializedNodes = nodes.map { n ->
+            SerializedNode(
+                id = n.id,
+                posX = n.position.x,
+                posY = n.position.y,
+                name = n.name,
+                role = n.role,
+                status = n.status,
+                toolsCount = n.toolsCount,
+                permissionLevel = n.permissionLevel,
+                inputs = n.inputs,
+                outputs = n.outputs
+            )
+        }
+        val serializedGraph = SerializedPipelineGraph(
+            version = 1,
+            name = "Exported Swarm Pipeline",
+            createdAt = System.currentTimeMillis(),
+            nodes = serializedNodes,
+            pipelines = pipelines.toList()
+        )
+        return GsonBuilder().setPrettyPrinting().create().toJson(serializedGraph)
+    }
 
     Scaffold(
         topBar = {
@@ -200,19 +284,33 @@ fun GraphScreen() {
                     }
                 },
                 actions = {
-                    // Force-Directed Auto-Layout Button
+                    // Export Pipeline JSON
+                    IconButton(onClick = { showExportDialog = true }) {
+                        Icon(Icons.Default.Download, contentDescription = "Export Graph JSON", tint = MaterialTheme.colorScheme.primary)
+                    }
+
+                    // Import Pre-defined Pipeline
+                    IconButton(onClick = {
+                        importJsonInput = ""
+                        importErrorMessage = null
+                        showImportDialog = true
+                    }) {
+                        Icon(Icons.Default.Upload, contentDescription = "Import Pipeline Template", tint = MaterialTheme.colorScheme.primary)
+                    }
+
+                    // Force-Directed Auto-Layout
                     IconButton(onClick = {
                         runForceDirectedAutoLayout(nodes, pipelines)
                     }) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = "Force-Directed Auto Layout", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "Auto Layout", tint = MaterialTheme.colorScheme.primary)
                     }
 
-                    // Reset Pan & Zoom
+                    // Recenter Canvas
                     IconButton(onClick = {
                         panOffset = Offset(0f, 0f)
                         zoomScale = 1.0f
                     }) {
-                        Icon(Icons.Default.CenterFocusWeak, contentDescription = "Recenter Canvas View")
+                        Icon(Icons.Default.CenterFocusWeak, contentDescription = "Recenter View")
                     }
 
                     // Global Swarm Pause
@@ -233,7 +331,7 @@ fun GraphScreen() {
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // View Mode Segmented Toolbar
+            // View Mode Toolbar
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth()
@@ -333,13 +431,12 @@ fun GraphScreen() {
 
             when (selectedTab) {
                 0 -> {
-                    // Node Canvas supporting Pan, Pinch-to-Zoom & Force-Directed Auto-Layout
+                    // Node Canvas
                     BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(MaterialTheme.colorScheme.surface)
                             .pointerInput(Unit) {
-                                // Compose Transformation API: Pan & Pinch-to-Zoom Gestures
                                 detectTransformGestures { _, pan, zoom, _ ->
                                     zoomScale = (zoomScale * zoom).coerceIn(0.4f, 2.5f)
                                     panOffset += pan
@@ -351,7 +448,6 @@ fun GraphScreen() {
                         val inactivePipeColor = MaterialTheme.colorScheme.outline
                         val draftPipeColor = MaterialTheme.colorScheme.primary
 
-                        // Transformed Canvas Content Box (Pan & Scale layer)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -363,7 +459,7 @@ fun GraphScreen() {
                                     transformOrigin = TransformOrigin(0f, 0f)
                                 }
                         ) {
-                            // 1. Grid Background & Bezier Pipelines
+                            // Grid & Pipelines
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val gridSpacing = 40f
                                 var x = 0f
@@ -383,7 +479,6 @@ fun GraphScreen() {
                                 val cardWidthPx = with(density) { 130.dp.toPx() }
                                 val cardHeaderHeightPx = with(density) { 45.dp.toPx() }
 
-                                // Render pipelines
                                 pipelines.forEach { edge ->
                                     val fromNode = nodes.find { it.id == edge.fromNodeId }
                                     val toNode = nodes.find { it.id == edge.toNodeId }
@@ -424,7 +519,6 @@ fun GraphScreen() {
                                     }
                                 }
 
-                                // Render draft connecting wire
                                 activeSourcePort?.let { (srcNodeId, srcPortId) ->
                                     val srcNode = nodes.find { it.id == srcNodeId }
                                     if (srcNode != null) {
@@ -455,7 +549,7 @@ fun GraphScreen() {
                                 }
                             }
 
-                            // 2. Render Node Cards on Canvas
+                            // Node Cards
                             nodes.forEach { node ->
                                 val isSelected = selectedNodeId == node.id
                                 val cardOffsetX = node.position.x.roundToInt()
@@ -509,7 +603,7 @@ fun GraphScreen() {
                             }
                         }
 
-                        // Floating Canvas Tools Bar (Zoom, Auto-Layout, Add Node)
+                        // Floating Canvas Controls
                         Surface(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
@@ -523,7 +617,6 @@ fun GraphScreen() {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                // Zoom Out
                                 IconButton(
                                     onClick = { zoomScale = (zoomScale - 0.2f).coerceAtLeast(0.4f) },
                                     modifier = Modifier.size(32.dp)
@@ -533,7 +626,6 @@ fun GraphScreen() {
 
                                 Text("${(zoomScale * 100).roundToInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
 
-                                // Zoom In
                                 IconButton(
                                     onClick = { zoomScale = (zoomScale + 0.2f).coerceAtMost(2.5f) },
                                     modifier = Modifier.size(32.dp)
@@ -543,7 +635,6 @@ fun GraphScreen() {
 
                                 VerticalDivider(modifier = Modifier.height(20.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
-                                // Force-Directed Auto-Layout Button
                                 Button(
                                     onClick = { runForceDirectedAutoLayout(nodes, pipelines) },
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -553,7 +644,6 @@ fun GraphScreen() {
                                     Text("Auto Layout", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
 
-                                // Add Agent Card Button
                                 Button(
                                     onClick = {
                                         val newNodeId = "node_${System.currentTimeMillis()}"
@@ -592,7 +682,7 @@ fun GraphScreen() {
                 }
 
                 1 -> {
-                    // Shared Scratchpad Inspector Pane
+                    // Scratchpad Inspector
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -638,12 +728,179 @@ fun GraphScreen() {
             }
         }
     }
+
+    // Modal Dialog for Exporting JSON
+    if (showExportDialog) {
+        val currentJson = remember { exportCurrentGraphJson() }
+        AlertDialog(
+            onDismissRequest = { showExportDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Download, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Export Pipeline Graph JSON")
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Serialized pipeline schema containing node layouts, ports, and edge connections.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    OutlinedTextField(
+                        value = currentJson,
+                        onValueChange = {},
+                        readOnly = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("Pipeline Graph JSON", currentJson)
+                    clipboard.setPrimaryClip(clip)
+                    showExportDialog = false
+                }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Copy to Clipboard")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExportDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    // Modal Dialog for Importing Pipeline Templates & Custom JSON
+    if (showImportDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Upload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Import Agent Pipeline Template")
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Select Built-In Pipeline Template:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+
+                    // Template 1: Full-Stack App Generator
+                    OutlinedButton(
+                        onClick = {
+                            val templateJson = """
+                            {
+                              "version": 1,
+                              "name": "Full-Stack App Generator",
+                              "nodes": [
+                                {"id": "node_orchestrator", "posX": 60.0, "posY": 100.0, "name": "Orchestrator Agent", "role": "Master Coordinator", "status": "RUNNING", "toolsCount": 10, "permissionLevel": "L1-L4 Permissive", "inputs": [{"id": "in_goal", "name": "Goal", "dataType": "Text", "isInput": true}], "outputs": [{"id": "out_task", "name": "Task", "dataType": "TaskPayload", "isInput": false}]},
+                                {"id": "node_ui_builder", "posX": 440.0, "posY": 50.0, "name": "UI Builder Agent", "role": "Compose Layout Engineer", "status": "IDLE", "toolsCount": 5, "permissionLevel": "L3 Read-Write", "inputs": [{"id": "in_task_ui", "name": "UI Spec", "dataType": "TaskPayload", "isInput": true}], "outputs": [{"id": "out_ui_code", "name": "Compose Code", "dataType": "FileDiff", "isInput": false}]},
+                                {"id": "node_db_agent", "posX": 440.0, "posY": 260.0, "name": "Database Agent", "role": "Room/Firestore Schema", "status": "IDLE", "toolsCount": 3, "permissionLevel": "L3 Read-Write", "inputs": [{"id": "in_task_db", "name": "DB Spec", "dataType": "TaskPayload", "isInput": true}], "outputs": [{"id": "out_db_code", "name": "Entity Schema", "dataType": "FileDiff", "isInput": false}]}
+                              ],
+                              "pipelines": [
+                                {"id": "p1", "fromNodeId": "node_orchestrator", "fromPortId": "out_task", "toNodeId": "node_ui_builder", "toPortId": "in_task_ui", "label": "ui_spec", "isActive": true},
+                                {"id": "p2", "fromNodeId": "node_orchestrator", "fromPortId": "out_task", "toNodeId": "node_db_agent", "toPortId": "in_task_db", "label": "db_spec", "isActive": true}
+                              ]
+                            }
+                            """.trimIndent()
+                            importJsonInput = templateJson
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Template 1: Full-Stack App Generator", style = MaterialTheme.typography.labelSmall)
+                    }
+
+                    // Template 2: Code Review & Refactoring Swarm
+                    OutlinedButton(
+                        onClick = {
+                            val templateJson = """
+                            {
+                              "version": 1,
+                              "name": "Code Review & Refactoring Swarm",
+                              "nodes": [
+                                {"id": "node_orchestrator", "posX": 60.0, "posY": 100.0, "name": "Orchestrator Agent", "role": "Master Coordinator", "status": "RUNNING", "toolsCount": 10, "permissionLevel": "L1-L4 Permissive", "inputs": [{"id": "in_goal", "name": "Goal", "dataType": "Text", "isInput": true}], "outputs": [{"id": "out_task", "name": "Task", "dataType": "TaskPayload", "isInput": false}]},
+                                {"id": "node_linter", "posX": 440.0, "posY": 60.0, "name": "Static Linter Agent", "role": "Lint & Syntax Analyzer", "status": "IDLE", "toolsCount": 2, "permissionLevel": "L2 Read-Only", "inputs": [{"id": "in_src", "name": "Source Code", "dataType": "TaskPayload", "isInput": true}], "outputs": [{"id": "out_issues", "name": "Lint Errors", "dataType": "IssuesReport", "isInput": false}]},
+                                {"id": "node_patcher", "posX": 820.0, "posY": 160.0, "name": "Patch Writer Agent", "role": "Automated Refactorer", "status": "IDLE", "toolsCount": 4, "permissionLevel": "L3 Read-Write", "inputs": [{"id": "in_issues", "name": "Lint Errors", "dataType": "IssuesReport", "isInput": true}], "outputs": [{"id": "out_patch", "name": "Code Patch", "dataType": "FileDiff", "isInput": false}]}
+                              ],
+                              "pipelines": [
+                                {"id": "p1", "fromNodeId": "node_orchestrator", "fromPortId": "out_task", "toNodeId": "node_linter", "toPortId": "in_src", "label": "analyze_src", "isActive": true},
+                                {"id": "p2", "fromNodeId": "node_linter", "fromPortId": "out_issues", "toNodeId": "node_patcher", "toPortId": "in_issues", "label": "fix_issues", "isActive": true}
+                              ]
+                            }
+                            """.trimIndent()
+                            importJsonInput = templateJson
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Template 2: Code Review & Refactor Swarm", style = MaterialTheme.typography.labelSmall)
+                    }
+
+                    Text("Or Paste Custom Pipeline JSON:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+
+                    OutlinedTextField(
+                        value = importJsonInput,
+                        onValueChange = {
+                            importJsonInput = it
+                            importErrorMessage = null
+                        },
+                        placeholder = { Text("{\n  \"nodes\": [...],\n  \"pipelines\": [...]\n}") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                    )
+
+                    importErrorMessage?.let { err ->
+                        Text(text = err, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (importJsonInput.isNotBlank()) {
+                            try {
+                                val gson = Gson()
+                                val parsed = gson.fromJson(importJsonInput, SerializedPipelineGraph::class.java)
+                                if (parsed != null && parsed.nodes != null) {
+                                    loadGraphFromSerialized(parsed)
+                                    showImportDialog = false
+                                } else {
+                                    importErrorMessage = "Invalid graph format: missing nodes list."
+                                }
+                            } catch (e: Exception) {
+                                importErrorMessage = "JSON Parse Error: ${e.message}"
+                            }
+                        }
+                    },
+                    enabled = importJsonInput.isNotBlank()
+                ) {
+                    Text("Import & Load Canvas")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 /**
  * Force-directed graph layout algorithm.
- * Applies Coulomb's law for node repulsion and Hooke's law along pipeline connections
- * to organize overlapping or chaotic nodes cleanly across the canvas.
  */
 fun runForceDirectedAutoLayout(
     nodes: List<GraphNodeData>,
@@ -665,7 +922,6 @@ fun runForceDirectedAutoLayout(
             var forceX = 0f
             var forceY = 0f
 
-            // Repulsive force between all nodes
             for (j in nodes.indices) {
                 if (i == j) continue
                 val nodeB = nodes[j]
@@ -679,7 +935,6 @@ fun runForceDirectedAutoLayout(
                 forceY += (dy / dist) * force
             }
 
-            // Attractive force along connected pipeline edges
             edges.forEach { edge ->
                 if (edge.fromNodeId == nodeA.id) {
                     val target = nodes.find { it.id == edge.toNodeId }
@@ -943,5 +1198,3 @@ fun InteractiveCanvasNodeCard(
         }
     }
 }
-
-
