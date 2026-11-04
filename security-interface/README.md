@@ -1,90 +1,77 @@
-# `:security-interface` — Security Interlock & Audit Relay
+# `:security-interface` — Interlock, Risk Policy and Audit
 
-The `:security-interface` module acts as an enforced security boundary between user-facing interfaces and the agentic execution engine. It intercepts every tool call, classifies its risk, requests human authorization when necessary, and maintains a tamper-evident audit log.
+Android library (`namespace = "com.apex.security"`, `minSdk 24`, `compileSdk 36`, Java 11) that
+depends on `:core-engine` and `androidx.core.ktx`. It provides the gate between model-requested tool
+calls and device state.
 
----
+## Risk policy
 
-## Architecture Overview
+`RiskLevel` defines `L0`–`L4` and `requiresApproval()` returns true for `L3` and `L4`.
 
-```
-                      ┌──────────────────────┐
-                      │   Tool Call Event    │
-                      └──────────┬───────────┘
-                                 │
-                                 ▼
-                     ┌────────────────────────┐
-                     │   ToolRiskRegistry     │
-                     │  (Evaluate Risk Level) │
-                     └──────────┬─────────────┘
-                                │
-               ┌────────────────┴────────────────┐
-               ▼                                 ▼
-        Risk < L3 (Safe)                 Risk >= L3 (Sensitive)
-               │                                 │
-               │                                 ▼
-               │                     ┌────────────────────────┐
-               │                     │      ApprovalPort      │
-               │                     │ (Prompt User in GUI)   │
-               │                     └──────────┬─────────────┘
-               │                                │
-               │                       ┌────────┴────────┐
-               │                       ▼                 ▼
-               │                   Approved            Denied
-               │                       │                 │
-               ▼                       ▼                 ▼
-     ┌───────────────────┐    ┌──────────────────┐  ┌───────────────┐
-     │ Tool Execution    │    │ Tool Execution   │  │ Return Error  │
-     │ in ToolRegistry   │    │ in ToolRegistry  │  │ to ReAct loop │
-     └─────────┬─────────┘    └────────┬─────────┘  └───────┬───────┘
-               │                       │                    │
-               └───────────────────────┼────────────────────┘
-                                       │
-                                       ▼
-                       ┌──────────────────────────────┐
-                       │       AuditLogManager        │
-                       │ (Append SHA-256 Hash-Chained)│
-                       └──────────────────────────────┘
-```
+`ToolRiskRegistry` seeds these mappings and resolves anything else to `L3`:
 
----
+| Tool | Level |
+| :--- | :--- |
+| `read_file` | L2 |
+| `list_files` | L2 |
+| `http_get` | L2 |
+| `write_file` | L3 |
+| `write_file_external` | L3 |
+| `http_post` | L3 |
+| `run_command` | L4 |
+| unregistered name, or null | L3 |
 
-## Risk Level Hierarchy (`RiskLevel.java`)
+`SystemStateManager` tracks `NORMAL` (0), `DEGRADED` (1) and `SAFE_MODE` (2), emitting a
+`system.state_changed` log and a `system.state` histogram on transition. No application code
+constructs it yet, so transitions are currently manual only.
 
-Each tool is assigned a risk level by `ToolRiskRegistry`. Tools classified as `L3` or `L4` require human authorization before execution.
+## `SecurityInterlock`
 
-| Level | Classification | Default Tools | Approval Policy |
-| :--- | :--- | :--- | :--- |
-| **`L0`** | Read-only inspection | `read_file`, `list_files` | **Automatic** (No prompt) |
-| **`L1`** | Sandboxed local write | `write_file` (internal workspace) | **Automatic** (No prompt) |
-| **`L2`** | External read / HTTP GET | `write_file_external`, `http_get` | **Automatic** (No prompt) |
-| **`L3`** | External mutation / Unknown | `http_post` to arbitrary hosts, **Any unknown tool** | **Requires User Approval** |
-| **`L4`** | Critical system execution | `run_command`, OS operations | **Mandatory User Approval** |
+Implements `ToolExecutorPort`. Order of operations per call:
 
-> **Important**: Any tool not explicitly registered in `ToolRiskRegistry` automatically defaults to **`L3`**, ensuring a fail-safe security posture.
+1. Kill switch check (`toolsPaused`) → deny with `DENIED_TOOLS_PAUSED`.
+2. Iteration budget check, `DEFAULT_MAX_ITERATIONS = 10` → deny with `DENIED_BUDGET_EXHAUSTED` and
+   throw `BudgetExhaustedException`.
+3. Malformed call check → deny with `DENIED_MALFORMED`.
+4. Risk lookup; if approval is required, request it through `ApprovalPort`. Missing port, thrown
+   exception, null/denied decision or request-id mismatch all deny.
+5. Tool lookup in `ToolRegistry`; unknown names are denied with `ERROR_NOT_FOUND`.
+6. Execute the worker; success appends `EXECUTED_OK`, a thrown exception appends `ERROR_THROWN` and
+   returns a failure result.
 
----
+All paths fail closed and every path appends an audit record.
 
-## Tamper-Evident Cryptographic Audit Trail (`AuditLogManager.java`)
+## `ToolInvocationInterceptor`
 
-Every tool evaluation, execution, and rejection is recorded into a hash-chained audit log.
+Implements `ToolExecutorPort` as a decorator around another executor. It opens a `tool.invoke` span
+with `tool.id`, counts `tool.invocations` and `security.denials`, records `tool.duration_ms`, records
+exceptions on the span, and wraps its telemetry in `SafeTelemetryDecorator`.
 
-### Hash Calculation Formula:
-```
-entryHash = SHA-256(timestamp + ":" + toolName + ":" + riskLevel + ":" + decision + ":" + argsHash + ":" + previousHash)
+## Audit
+
+- `AuditLogManager` implements `AuditPort`: builds records, links them with SHA-256, exposes
+  `verifyChain()`, and falls back to an in-memory list when no `AuditStorePort` is supplied.
+- `FileAuditStore` implements `AuditStorePort`: JSONL segments (`audit_active.jsonl`, rotated to
+  `audit_<millis>.jsonl`), fsync on append and rotation, `verify()` returning the zero-based index of
+  the first broken link.
+- `AuditChainBrokenException` carries the failing index.
+- Format details and decision codes: [../docs/audit-format.md](../docs/audit-format.md).
+
+## Tests
+
+Five classes, 19 test methods: `AuditLogManagerTest`, `FileAuditStoreTest`,
+`SecurityInterlockFailClosedTest`, `ToolInvocationInterceptorTest`, `SecurityInterlockTest`.
+
+```bash
+gradle :security-interface:test
 ```
 
-1. **`previousHash`**: The SHA-256 hash of the immediately preceding audit record. The initial record uses an all-zero genesis hash.
-2. **`argsHash`**: SHA-256 hash of the tool's input arguments map.
-3. **`entryHash`**: Canonical SHA-256 hash binding all fields together.
-4. **Verification (`verifyChain()`)**: Traverses the audit trail and verifies that every link's hash matches the recomputed digest. If any record has been modified or excised, verification fails.
+## Known issues
 
----
-
-## Interlock Implementation (`SecurityInterlock.java`)
-
-`SecurityInterlock` implements `ToolExecutorPort`:
-
-1. Queries `ToolRiskRegistry` for the tool's risk level.
-2. If `risk.requiresApproval()`, calls the host application's `ApprovalPort`.
-3. If denied, creates an `AuditRecord` with status `DENIED` and returns an `ExecutionResult.fail` without calling the tool.
-4. If approved (or risk < `L3`), executes the tool through `ToolRegistry` and records `EXECUTED_OK`.
+- `SecurityInterlock.java:91`, `:103` and `:109` pass a `String` message to
+  `AuditLogManager.createAndAppend(long, String, String, String, Map<String, String>)`, which expects
+  the argument map. Those three paths do not compile until the signature or the call sites are
+  reconciled.
+- Production code (`ChatScreen.kt:819`) constructs `AuditLogManager()` without a store, so audit
+  records are in memory only and no file is written at runtime.
+- The audit chain is unsigned: a full rewrite cannot be detected from inside the app.

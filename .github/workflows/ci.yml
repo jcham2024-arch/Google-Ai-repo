@@ -30,7 +30,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # --- Architectural Guardrail Checks (C1 - C8) ---
+      # --- Architectural Guardrail Checks (C1, C2, C3, C4, C6, C8, C10; C5 is the secret scan below) ---
 
       - name: "Guardrail C1: Verify Zero Dependencies in :core-engine"
         run: |
