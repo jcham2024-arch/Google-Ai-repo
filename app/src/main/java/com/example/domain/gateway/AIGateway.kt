@@ -16,7 +16,14 @@ data class AIResponse(
     val provider: String,
     val model: String,
     val hasSearchGrounding: Boolean = false,
-    val suggestedFileEdit: String? = null
+    val suggestedFileEdit: String? = null,
+    val toolCalls: List<ToolCall> = emptyList()
+)
+
+data class ToolCall(
+    val id: String,
+    val name: String,
+    val arguments: Map<String, String>
 )
 
 interface AIGateway {
@@ -29,7 +36,8 @@ interface AIGateway {
         apiKey: String = "",
         maxTokens: Int = 4096,
         enableSearchGrounding: Boolean = true,
-        allowSelfEditing: Boolean = false
+        allowSelfEditing: Boolean = false,
+        tools: List<Map<String, Any>> = emptyList()
     ): AIResponse
 }
 
@@ -49,7 +57,8 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         apiKey: String,
         maxTokens: Int,
         enableSearchGrounding: Boolean,
-        allowSelfEditing: Boolean
+        allowSelfEditing: Boolean,
+        tools: List<Map<String, Any>> = emptyList()
     ): AIResponse = withContext(Dispatchers.IO) {
         val isGemini = providerName.contains("gemini", ignoreCase = true) ||
                 baseUrl.contains("googleapis.com", ignoreCase = true)
@@ -63,7 +72,8 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                 apiKeyOverride = apiKey,
                 maxTokens = maxTokens,
                 enableSearchGrounding = enableSearchGrounding,
-                allowSelfEditing = allowSelfEditing
+                allowSelfEditing = allowSelfEditing,
+                tools = tools
             )
         } else {
             generateOpenAiCompatibleResponse(
@@ -74,7 +84,8 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                 baseUrl = baseUrl,
                 apiKey = apiKey,
                 maxTokens = maxTokens,
-                allowSelfEditing = allowSelfEditing
+                allowSelfEditing = allowSelfEditing,
+                tools = tools
             )
         }
     }
@@ -87,7 +98,8 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         apiKeyOverride: String,
         maxTokens: Int,
         enableSearchGrounding: Boolean,
-        allowSelfEditing: Boolean
+        allowSelfEditing: Boolean,
+        tools: List<Map<String, Any>> = emptyList()
     ): AIResponse {
         val resolvedKey = apiKeyOverride.ifBlank {
             try {
@@ -133,12 +145,33 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                     put("maxOutputTokens", if (maxTokens > 0) maxTokens else 4096)
                 })
 
+                val toolsArray = JSONArray()
                 if (enableSearchGrounding) {
-                    put("tools", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("googleSearch", JSONObject())
-                        })
+                    toolsArray.put(JSONObject().apply {
+                        put("googleSearch", JSONObject())
                     })
+                }
+                if (tools.isNotEmpty()) {
+                    val functionDeclarations = JSONArray()
+                    for (tool in tools) {
+                        val function = tool["function"] as? Map<String, Any> ?: continue
+                        val declaration = JSONObject().apply {
+                            put("name", function["name"] as? String ?: "")
+                            put("description", function["description"] as? String ?: "")
+                            if (function["parameters"] is Map<*, *>) {
+                                put("parameters", JSONObject(function["parameters"] as Map<String, Any>))
+                            }
+                        }
+                        functionDeclarations.put(declaration)
+                    }
+                    if (functionDeclarations.length() > 0) {
+                        toolsArray.put(JSONObject().apply {
+                            put("functionDeclarations", functionDeclarations)
+                        })
+                    }
+                }
+                if (toolsArray.length() > 0) {
+                    put("tools", toolsArray)
                 }
             }
 
@@ -171,7 +204,30 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                 val firstCandidate = candidates?.optJSONObject(0)
                 val contentObj = firstCandidate?.optJSONObject("content")
                 val parts = contentObj?.optJSONArray("parts")
+                
                 val text = parts?.optJSONObject(0)?.optString("text") ?: "No text returned."
+
+                // Parse function calls from Gemini response
+                val toolCalls = mutableListOf<ToolCall>()
+                if (parts != null) {
+                    for (i in 0 until parts.length()) {
+                        val part = parts.optJSONObject(i)
+                        val functionCall = part?.optJSONObject("functionCall")
+                        if (functionCall != null) {
+                            val name = functionCall.optString("name", "")
+                            val argsJson = functionCall.optJSONObject("args")
+                            val argsMap = mutableMapOf<String, String>()
+                            if (argsJson != null) {
+                                val keys = argsJson.keys()
+                                while (keys.hasNext()) {
+                                    val key = keys.next()
+                                    argsMap[key] = argsJson.optString(key, "")
+                                }
+                            }
+                            toolCalls.add(ToolCall(java.util.UUID.randomUUID().toString(), name, argsMap))
+                        }
+                    }
+                }
 
                 var fileEdit: String? = null
                 if (allowSelfEditing && (prompt.contains("edit code", ignoreCase = true) || prompt.contains("refactor", ignoreCase = true))) {
@@ -183,7 +239,8 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                     provider = providerName,
                     model = modelName,
                     hasSearchGrounding = enableSearchGrounding,
-                    suggestedFileEdit = fileEdit
+                    suggestedFileEdit = fileEdit,
+                    toolCalls = toolCalls
                 )
             }
         } catch (e: Exception) {
@@ -205,7 +262,8 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         baseUrl: String,
         apiKey: String,
         maxTokens: Int,
-        allowSelfEditing: Boolean
+        allowSelfEditing: Boolean,
+        tools: List<Map<String, Any>> = emptyList()
     ): AIResponse {
         val cleanBaseUrl = baseUrl.trimEnd('/')
         val endpoint = if (cleanBaseUrl.endsWith("/chat/completions")) {
@@ -231,6 +289,10 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                     })
                 }
                 put("messages", messages)
+                if (tools.isNotEmpty()) {
+                    put("tools", JSONArray(tools))
+                    put("tool_choice", "auto")
+                }
             }
 
             val requestBuilder = Request.Builder()
@@ -267,7 +329,32 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                 val choices = responseJson.optJSONArray("choices")
                 val firstChoice = choices?.optJSONObject(0)
                 val message = firstChoice?.optJSONObject("message")
-                val text = message?.optString("content") ?: "No response message returned."
+                val text = message?.optString("content") ?: ""
+
+                // Parse tool calls from OpenAI response
+                val toolCalls = mutableListOf<ToolCall>()
+                val toolCallsArray = message?.optJSONArray("tool_calls")
+                if (toolCallsArray != null) {
+                    for (i in 0 until toolCallsArray.length()) {
+                        val tc = toolCallsArray.optJSONObject(i)
+                        if (tc != null) {
+                            val id = tc.optString("id", "")
+                            val function = tc.optJSONObject("function")
+                            if (function != null) {
+                                val name = function.optString("name", "")
+                                val argsStr = function.optString("arguments", "{}")
+                                val argsJson = JSONObject(argsStr)
+                                val argsMap = mutableMapOf<String, String>()
+                                val keys = argsJson.keys()
+                                while (keys.hasNext()) {
+                                    val key = keys.next()
+                                    argsMap[key] = argsJson.optString(key, "")
+                                }
+                                toolCalls.add(ToolCall(id, name, argsMap))
+                            }
+                        }
+                    }
+                }
 
                 var fileEdit: String? = null
                 if (allowSelfEditing && (prompt.contains("edit code", ignoreCase = true) || prompt.contains("refactor", ignoreCase = true))) {
@@ -279,7 +366,8 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                     provider = providerName,
                     model = modelName,
                     hasSearchGrounding = false,
-                    suggestedFileEdit = fileEdit
+                    suggestedFileEdit = fileEdit,
+                    toolCalls = toolCalls
                 )
             }
         } catch (e: Exception) {

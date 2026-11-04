@@ -316,13 +316,16 @@ fun rememberChatViewModel(): ChatViewModel {
         val gateway = UniversalAIGatewayImpl(context)
 
         val toolRegistry = ToolRegistry()
+        val fileGovernanceEngine = FileGovernanceEngine(context)
         toolRegistry.register(ReadFileToolWorker(context.filesDir))
+        toolRegistry.register(WriteFileToolWorker(fileGovernanceEngine, context.filesDir))
         toolRegistry.register(HttpGetToolWorker())
         toolRegistry.register(HttpPostToolWorker())
         toolRegistry.register(RunCommandToolWorker())
 
         val riskRegistry = ToolRiskRegistry()
-        riskRegistry.registerRisk("read_file", RiskLevel.L1)
+        riskRegistry.registerRisk("read_file", RiskLevel.L2)
+        riskRegistry.registerRisk("write_file", RiskLevel.L3)
         riskRegistry.registerRisk("http_get", RiskLevel.L2)
         riskRegistry.registerRisk("http_post", RiskLevel.L3)
         riskRegistry.registerRisk("run_command", RiskLevel.L4)
