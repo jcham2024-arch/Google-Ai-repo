@@ -27,6 +27,7 @@ interface AIGateway {
         modelName: String = "gemini-3.8-flash",
         baseUrl: String = "https://generativelanguage.googleapis.com/",
         apiKey: String = "",
+        maxTokens: Int = 4096,
         enableSearchGrounding: Boolean = true,
         allowSelfEditing: Boolean = false
     ): AIResponse
@@ -46,6 +47,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         modelName: String,
         baseUrl: String,
         apiKey: String,
+        maxTokens: Int,
         enableSearchGrounding: Boolean,
         allowSelfEditing: Boolean
     ): AIResponse = withContext(Dispatchers.IO) {
@@ -59,6 +61,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                 providerName = providerName,
                 modelName = modelName,
                 apiKeyOverride = apiKey,
+                maxTokens = maxTokens,
                 enableSearchGrounding = enableSearchGrounding,
                 allowSelfEditing = allowSelfEditing
             )
@@ -70,6 +73,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                 modelName = modelName,
                 baseUrl = baseUrl,
                 apiKey = apiKey,
+                maxTokens = maxTokens,
                 allowSelfEditing = allowSelfEditing
             )
         }
@@ -81,6 +85,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         providerName: String,
         modelName: String,
         apiKeyOverride: String,
+        maxTokens: Int,
         enableSearchGrounding: Boolean,
         allowSelfEditing: Boolean
     ): AIResponse {
@@ -124,6 +129,10 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                     })
                 }
 
+                put("generationConfig", JSONObject().apply {
+                    put("maxOutputTokens", if (maxTokens > 0) maxTokens else 4096)
+                })
+
                 if (enableSearchGrounding) {
                     put("tools", JSONArray().apply {
                         put(JSONObject().apply {
@@ -141,8 +150,16 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
             httpClient.newCall(request).execute().use { response ->
                 val bodyString = response.body?.string() ?: ""
                 if (!response.isSuccessful) {
+                    val isTokenError = response.code == 400 || response.code == 422 ||
+                            bodyString.contains("token", ignoreCase = true) ||
+                            bodyString.contains("context_length", ignoreCase = true)
+                    val errMsg = if (isTokenError) {
+                        "Token Limit Exceeded (HTTP ${response.code}): Prompt or output token limit ($maxTokens max tokens) was exceeded for $modelName. Response: $bodyString"
+                    } else {
+                        "Gemini API error (${response.code}): $bodyString"
+                    }
                     return AIResponse(
-                        text = "Gemini API error (${response.code}): $bodyString",
+                        text = errMsg,
                         provider = providerName,
                         model = modelName,
                         hasSearchGrounding = false
@@ -187,6 +204,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         modelName: String,
         baseUrl: String,
         apiKey: String,
+        maxTokens: Int,
         allowSelfEditing: Boolean
     ): AIResponse {
         val cleanBaseUrl = baseUrl.trimEnd('/')
@@ -199,6 +217,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         try {
             val jsonBody = JSONObject().apply {
                 put("model", modelName)
+                put("max_tokens", if (maxTokens > 0) maxTokens else 4096)
                 val messages = JSONArray().apply {
                     if (systemInstruction.isNotBlank()) {
                         put(JSONObject().apply {
@@ -225,8 +244,19 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
             httpClient.newCall(requestBuilder.build()).execute().use { response ->
                 val bodyString = response.body?.string() ?: ""
                 if (!response.isSuccessful) {
+                    val isTokenError = response.code == 400 || response.code == 422 || response.code == 429 ||
+                            bodyString.contains("token", ignoreCase = true) ||
+                            bodyString.contains("context_length", ignoreCase = true) ||
+                            bodyString.contains("max_tokens", ignoreCase = true)
+
+                    val userFriendlyMessage = if (isTokenError) {
+                        "Token Limit Error (HTTP ${response.code}): Prompt or output token limit ($maxTokens max tokens) was exceeded for $providerName / $modelName. Response: $bodyString"
+                    } else {
+                        "Provider '$providerName' returned error (${response.code}): $bodyString"
+                    }
+
                     return AIResponse(
-                        text = "Provider '$providerName' returned error (${response.code}): $bodyString",
+                        text = userFriendlyMessage,
                         provider = providerName,
                         model = modelName,
                         hasSearchGrounding = false

@@ -30,7 +30,7 @@ fun WorkspaceScreen() {
                     WorkspaceFile(
                         path = "workspace/README.md",
                         name = "README.md",
-                        content = "# Apex Agentic Master Content\nWorkspace initialized successfully. Master Narrator governs file creation and self-improvement."
+                        content = "# Apex Agentic Master Content\nWorkspace initialized successfully. Master Agent governs file creation and self-improvement."
                     )
                 )
             }

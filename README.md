@@ -58,7 +58,7 @@ apex-android/
 │       │   ├── ApprovalDecision.java        # User decision (approved/denied) and comment
 │       │   └── AuditRecord.java             # Hash-chained record with SHA-256 entry hashes
 │       │
-│       ├── tool/                            # In-process tool execution engine (replaces ProcessBuilder)
+│       ├── tool/                            # In-process tool execution engine
 │       │   ├── ToolWorker.java              # In-process tool execution interface
 │       │   └── ToolRegistry.java            # Thread-safe tool worker registry on thread pool
 │       │
@@ -86,7 +86,7 @@ apex-android/
 │   ├── README.md                            # Detailed documentation for Compose screens and state
 │   ├── build.gradle.kts                     # App module configuration with multi-module dependencies
 │   └── src/main/
-│       ├── AndroidManifest.xml              # Manifest with network and storage permissions
+│       ├── AndroidManifest.xml              # Manifest with network permissions
 │       │
 │       ├── java/com/example/
 │       │   ├── MainActivity.kt              # App entry point initializing edge-to-edge Compose UI
@@ -98,13 +98,13 @@ apex-android/
 │       │   │   │   └── AppDatabase.kt       # Room SQLite database and DAO definitions
 │       │   │   └── provider/
 │       │   │       ├── AndroidKeyStoreManager.kt       # Hardware-backed AES-256 GCM key encryption
-│       │   │       ├── ProviderPresets.kt              # Reconciled preset list (DeepSeek, Groq, Ollama, etc.)
-│       │   │       └── ProviderConfigurationManager.kt # DataStore preferences manager with connection testing
+│       │   │       ├── ProviderPresets.kt              # Reconciled preset list (DeepSeek, Groq, Gemini, etc.)
+│       │   │       └── ProviderConfigurationManager.kt # DataStore preferences manager with updateModelId & maxTokens
 │       │   │
 │       │   ├── domain/
 │       │   │   ├── engine/
 │       │   │   │   ├── ProviderRegistry.kt    # In-memory reactive registry holding active provider StateFlows
-│       │   │   │   ├── NarratorOrchestrator.kt# Master Narrator coordinating turns and file governance
+│       │   │   │   ├── AgentOrchestrator.kt   # Master Agent orchestrator coordinating turns and tool execution
 │       │   │   │   └── FileGovernanceEngine.kt# Secure workspace file writer and approved edit applicator
 │       │   │   └── gateway/
 │       │   │       └── AIGateway.kt           # UniversalAIGatewayImpl supporting Gemini and OpenAI endpoints
@@ -113,14 +113,14 @@ apex-android/
 │       │       ├── navigation/
 │       │       │   └── AppNavigation.kt       # Type-safe bottom navigation scaffold
 │       │       ├── chat/
-│       │       │   ├── ChatScreen.kt          # Chat screen with Narrator refresh dialog and approval prompts
-│       │       │   └── PerchanceBrowserScreen.kt # Native WebView wrapper for Perchance AI Chat Generator
+│       │       │   └── ChatScreen.kt          # Chat screen with Agent execution trace and approval prompts
 │       │       ├── settings/
 │       │       │   └── SettingsScreen.kt      # Provider configuration screen with live connection testing
 │       │       ├── agents/
 │       │       │   └── AgentListScreen.kt     # Agent Swarm card registry and creation dialog
-│       │       └── workspace/
-│       │           └── WorkspaceScreen.kt     # Workspace file explorer and viewer
+│       │       ├── workspace/
+│       │       │   └── WorkspaceScreen.kt     # Workspace file explorer and viewer
+│       │       └── ProviderConfigScreen.kt    # Provider configuration with editable Model IDs & masked keys
 │       │
 │       └── res/
 │           ├── drawable/                      # Vector assets and custom launcher icons
@@ -140,7 +140,7 @@ apex-android/
 ### 1. `:core-engine`
 - **Language Level**: Strictly Java 11. Records are prohibited because Android ART API 26+ does not support Java 21 bytecode. All models are implemented as immutable `final` classes.
 - **Dependencies**: Exactly zero third-party libraries. Classpath only contains `java.base`.
-- **No Desktop APIs**: Desktop-specific classes like `Thread.ofVirtual()`, `java.net.http.HttpClient`, `ProcessBuilder`, and `ProcessHandle` have been replaced with Android-compatible primitives (cached thread pools, `HttpURLConnection`, and in-process `ToolWorker` execution).
+- **No Desktop APIs**: Desktop-specific classes like `Thread.ofVirtual()`, `java.net.http.HttpClient`, `ProcessBuilder`, and `ProcessHandle` have been replaced with Android-compatible primitives.
 - **Nine Port Interfaces**: Clean boundary separating reasoning, planning, tool execution, human approval, persistence, secrets, and auditing.
 
 ### 2. `:security-interface`
@@ -148,33 +148,32 @@ apex-android/
 - **Risk Level Hierarchy**:
   - `L0`: Non-mutating read actions (`read_file`, `list_files`) - Allowed automatically.
   - `L1`: Local sandboxed writes (`write_file` inside app directory) - Allowed automatically.
-  - `L2`: Non-sensitive network or external file reads (`http_get`, external reads) - Allowed automatically.
-  - `L3`: Network mutations (`http_post` to arbitrary hosts, unknown tools) - **Requires User Approval**.
+  - `L2`: Non-sensitive network or external file reads (`http_get`) - Allowed automatically.
+  - `L3`: Network mutations (`http_post` to arbitrary hosts) - **Requires User Approval**.
   - `L4`: Shell execution or root operations (`run_command`) - **Mandatory User Approval**.
-- **Cryptographic Audit Trail**: Each tool invocation creates an `AuditRecord` with a SHA-256 hash of its parameters, decision, timestamp, and previous entry hash, forming a tamper-evident chain.
+- **Cryptographic Audit Trail**: Each tool invocation creates an `AuditRecord` with a SHA-256 hash forming a tamper-evident chain.
 
 ### 3. `:app`
 - **Zero Direct Engine Access**: The application UI consumes `:security-interface` and never imports `com.apex.core` engine internals directly.
-- **Hardware-Backed Keystore**: API keys are encrypted with an AES-256 GCM key stored inside Android Keystore (`AndroidKeyStoreManager`). No raw API keys are ever stored in plain text or written to logs.
-- **DataStore Preferences**: Non-sensitive provider configurations (`id`, `name`, `baseUrl`, `defaultModel`, `isActive`) are persisted using Jetpack DataStore (`ProviderConfigurationManager`).
-- **Dynamic Provider Injection**: `ProviderRegistry` exposes reactive `StateFlow` streams that dynamically inject provider settings into `NarratorOrchestrator` on the fly.
-- **Connection Diagnostics**: The Settings screen includes an integrated "Test Connection" tool that queries `/models` or issues a 1-token test ping to `/chat/completions`.
+- **Hardware-Backed Keystore**: API keys are encrypted with an AES-256 GCM key stored inside Android Keystore (`AndroidKeyStoreManager`).
+- **DataStore Preferences**: Non-sensitive provider configurations (`id`, `name`, `baseUrl`, `defaultModel`, `maxTokens`, `isActive`) are persisted using Jetpack DataStore (`ProviderConfigurationManager`).
+- **Dynamic Provider Injection**: `ProviderRegistry` exposes reactive `StateFlow` streams that dynamically inject provider settings into `AgentOrchestrator` on the fly.
+- **Connection Diagnostics**: The Settings / ProviderConfig screen includes an integrated "Test Connection" tool.
 
 ---
 
 ## Supported AI Provider Presets
 
-| Provider Name | Base URL | Default Model | Key Storage |
-| :--- | :--- | :--- | :--- |
-| **Gemini (OpenAI Compatible)** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` | Android Keystore |
-| **OpenRouter** | `https://openrouter.ai/api/v1` | `meta-llama/llama-3.3-70b-instruct` | Android Keystore |
-| **Groq** | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` | Android Keystore |
-| **DeepSeek** | `https://api.deepseek.com/v1` | `deepseek-chat` | Android Keystore |
-| **OpenAI** | `https://api.openai.com/v1` | `gpt-4o` | Android Keystore |
-| **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct` | Android Keystore |
-| **Ollama (Local)** | `http://10.0.2.2:11434/v1` | `llama3` | Optional / Local |
-| **LM Studio (Local)** | `http://10.0.2.2:1234/v1` | `local-model` | Optional / Local |
-| **Custom** | User configurable | User configurable | Android Keystore |
+| Provider Name | Base URL | Default Model | Max Tokens | Key Storage |
+| :--- | :--- | :--- | :--- | :--- |
+| **Gemini (OpenAI Compatible)** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` | 65,536 | Android Keystore |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | `meta-llama/llama-3.3-70b-instruct` | 8,192 | Android Keystore |
+| **Groq** | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` | 8,192 | Android Keystore |
+| **DeepSeek** | `https://api.deepseek.com/v1` | `deepseek-chat` | 8,192 | Android Keystore |
+| **OpenAI** | `https://api.openai.com/v1` | `gpt-4o` | 4,096 | Android Keystore |
+| **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.3-70b-instruct` | 4,096 | Android Keystore |
+| **Ollama (Local)** | `http://10.0.2.2:11434/v1` | `llama3` | 4,096 | Optional / Local |
+| **Custom** | User configurable | User configurable | User configurable | Android Keystore |
 
 ---
 

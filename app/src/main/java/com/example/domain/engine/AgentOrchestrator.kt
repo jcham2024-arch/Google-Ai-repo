@@ -53,6 +53,8 @@ class AgentOrchestrator(
         val apiKey = currentProvider?.apiKey ?: ""
         val model = resolvedModel ?: currentProvider?.defaultModel ?: "gemini-2.5-flash"
 
+        val maxTokens = currentProvider?.maxTokens ?: 4096
+
         val response = gateway.generateChatResponse(
             prompt = prompt,
             systemInstruction = resolvedSystemInstruction,
@@ -60,6 +62,7 @@ class AgentOrchestrator(
             modelName = model,
             baseUrl = baseUrl,
             apiKey = apiKey,
+            maxTokens = maxTokens,
             enableSearchGrounding = enableSearchGrounding,
             allowSelfEditing = false
         )
