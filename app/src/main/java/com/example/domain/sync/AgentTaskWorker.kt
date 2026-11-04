@@ -137,5 +137,10 @@ class AgentTaskWorker(
                 .setInputData(inputData)
                 .build()
         }
+
+        fun enqueue(context: Context) {
+            val req = androidx.work.OneTimeWorkRequestBuilder<AgentTaskWorker>().build()
+            androidx.work.WorkManager.getInstance(context).enqueue(req)
+        }
     }
 }

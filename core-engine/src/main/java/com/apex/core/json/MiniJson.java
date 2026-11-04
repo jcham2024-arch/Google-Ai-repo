@@ -16,6 +16,24 @@ import java.util.TreeMap;
 public final class MiniJson implements JsonCodecPort {
     public static final MiniJson INSTANCE = new MiniJson();
 
+    public static class JsonNode {
+        private final Object raw;
+        public JsonNode(Object raw) { this.raw = raw; }
+        public Object getRaw() { return raw; }
+        @Override
+        public String toString() { return valueToJson(raw); }
+    }
+
+    public static JsonNode parse(String json) {
+        if (json == null || json.trim().isEmpty()) return new JsonNode(Collections.emptyMap());
+        try {
+            JsonParser parser = new JsonParser(json);
+            return new JsonNode(parser.parseValue());
+        } catch (Exception e) {
+            return new JsonNode(Collections.emptyMap());
+        }
+    }
+
     public MiniJson() {}
 
     public static String escape(String s) {

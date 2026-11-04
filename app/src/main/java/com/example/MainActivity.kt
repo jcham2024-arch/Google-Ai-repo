@@ -10,6 +10,7 @@ import com.example.ui.theme.MyApplicationTheme
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    com.example.core.net.Http.prefetchDns(listOf("generativelanguage.googleapis.com", "api.openai.com", "mcp.apexagent.internal"))
     enableEdgeToEdge()
     setContent {
       MyApplicationTheme {
