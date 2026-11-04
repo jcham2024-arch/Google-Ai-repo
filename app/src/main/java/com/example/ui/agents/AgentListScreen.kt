@@ -34,17 +34,66 @@ fun AgentListScreen() {
     LaunchedEffect(Unit) {
         dao.getAllAgents().collect { list ->
             agents = list.ifEmpty {
-                val defaultCard = AgentCard(
+                val masterCard = AgentCard(
                     id = "agent_master",
                     name = "Master Agent",
                     description = "Orchestrates sub-agent swarms and governs task and tool execution.",
-                    systemPrompt = "You are Master Agent, an advanced general-purpose AI assistant and orchestrator.",
+                    systemPrompt = """
+                        You are Master Agent, an expert Android developer and orchestrator.
+                        
+                        You have access to the workspace files via these tools:
+                        - read_file: Read the contents of a file
+                        - read_file_range: Read specific line ranges of large files
+                        - write_file: Write complete file contents (requires user approval)
+                        - http_get/http_post: Make HTTP requests
+                        - run_command: Execute shell commands
+                        
+                        When making code changes, ALWAYS follow this loop:
+                        1. Use read_file to inspect the target file.
+                        2. Formulate your changes.
+                        3. Use write_file to apply the exact, complete code.
+                        4. Use read_file again to verify the file was saved correctly.
+                        
+                        Do not provide partial snippets. Provide complete, compilable blocks.
+                        
+                        If a file is too large, use read_file_range to navigate it efficiently.
+                        Always respect the security interlock - high-risk operations require user approval.
+                        """.trimIndent(),
                     preferredProvider = "Google Gemini",
-                    preferredModel = "gemini-3.8-flash",
+                    preferredModel = "gemini-2.5-flash",
                     isMasterAgent = true
                 )
-                dao.insertAgent(defaultCard)
-                listOf(defaultCard)
+                val builderCard = AgentCard(
+                    id = "agent_builder",
+                    name = "Builder Agent",
+                    description = "Specialized agent for Android code generation, refactoring, and build pipeline tasks.",
+                    systemPrompt = """
+                        You are Builder Agent, an expert Android/Kotlin developer specialized in code generation and build pipelines.
+                        
+                        Your workflow for ANY code task:
+                        1. read_file - Examine the target file(s) first
+                        2. Plan your changes completely
+                        3. write_file - Write the FULL, compilable file content
+                        4. read_file - Verify the write succeeded
+                        
+                        For large files: Use read_file_range(start_line, end_line) to navigate.
+                        
+                        CRITICAL RULES:
+                        - NEVER output partial snippets. Always write complete files.
+                        - Run commands to verify syntax: ./gradlew compileKotlin or ./gradlew assembleDebug
+                        - If build fails, read the error, fix the code, and retry.
+                        - Follow Android best practices: Compose, Material3, Coroutines, Room, Hilt/Dagger.
+                        - Ensure all imports are correct and no unresolved references.
+                        
+                        When the user asks to build/export: Use the Export Workspace button in the Workspace screen to generate a zip for external compilation.
+                        """.trimIndent(),
+                    preferredProvider = "Google Gemini",
+                    preferredModel = "gemini-2.5-flash",
+                    isMasterAgent = false
+                )
+                dao.insertAgent(masterCard)
+                dao.insertAgent(builderCard)
+                listOf(masterCard, builderCard)
             }
         }
     }
@@ -151,7 +200,7 @@ fun AgentListScreen() {
                                 description = "Custom specialized sub-agent card",
                                 systemPrompt = newAgentPrompt.trim(),
                                 preferredProvider = "Google Gemini",
-                                preferredModel = "gemini-3.8-flash"
+                                preferredModel = "gemini-2.5-flash"
                             )
                             dao.insertAgent(newAgent)
                             newAgentName = ""

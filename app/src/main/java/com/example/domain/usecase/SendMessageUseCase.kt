@@ -1,13 +1,18 @@
 package com.example.domain.usecase
 
 import com.example.data.model.ChatMessage
+import com.example.domain.gateway.AIResponse
+import com.example.domain.gateway.ToolCall
 import com.example.domain.repository.ChatRepository
 import com.example.domain.sync.OfflineSyncManager
+import com.google.gson.Gson
 
 class SendMessageUseCase(
     private val chatRepository: ChatRepository,
     private val offlineSyncManager: OfflineSyncManager? = null
 ) {
+    private val gson = Gson()
+
     suspend operator fun invoke(
         chatId: String,
         content: String,
@@ -45,6 +50,11 @@ class SendMessageUseCase(
                 systemInstruction = systemInstruction,
                 modelOverride = modelOverride
             )
+            val toolCallsJson = if (response.toolCalls.isNotEmpty()) {
+                gson.toJson(response.toolCalls)
+            } else {
+                null
+            }
             val assistantMsg = ChatMessage(
                 chatId = chatId,
                 senderName = "Apex Agent",
@@ -53,7 +63,8 @@ class SendMessageUseCase(
                 providerUsed = response.provider,
                 modelUsed = response.model,
                 hasSearchGrounding = response.hasSearchGrounding,
-                pendingFileEdit = response.suggestedFileEdit
+                pendingFileEdit = response.suggestedFileEdit,
+                toolCallsJson = toolCallsJson
             )
             chatRepository.saveMessage(assistantMsg)
             Result.success(assistantMsg)

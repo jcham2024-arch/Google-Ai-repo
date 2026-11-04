@@ -31,7 +31,7 @@ interface AIGateway {
         prompt: String,
         systemInstruction: String,
         providerName: String = "Google Gemini",
-        modelName: String = "gemini-3.8-flash",
+        modelName: String = "gemini-2.5-flash",
         baseUrl: String = "https://generativelanguage.googleapis.com/",
         apiKey: String = "",
         maxTokens: Int = 4096,
@@ -39,6 +39,13 @@ interface AIGateway {
         allowSelfEditing: Boolean = false,
         tools: List<Map<String, Any>> = emptyList()
     ): AIResponse
+
+    suspend fun getEmbeddings(
+        text: String,
+        providerName: String = "Google Gemini",
+        baseUrl: String = "https://generativelanguage.googleapis.com/",
+        apiKey: String = ""
+    ): List<Float>
 }
 
 class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
@@ -377,6 +384,83 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
                 model = modelName,
                 hasSearchGrounding = false
             )
+        }
+    }
+
+    override suspend fun getEmbeddings(
+        text: String,
+        providerName: String,
+        baseUrl: String,
+        apiKey: String
+    ): List<Float> = withContext(Dispatchers.IO) {
+        val isGemini = providerName.contains("gemini", ignoreCase = true) ||
+                baseUrl.contains("googleapis.com", ignoreCase = true)
+
+        val cleanBaseUrl = baseUrl.trimEnd('/')
+        val endpoint = if (isGemini) {
+            // Gemini embedding endpoint
+            "$cleanBaseUrl/v1beta/models/text-embedding-004:embedContent?key=$apiKey"
+        } else {
+            // OpenAI-compatible embedding endpoint
+            if (cleanBaseUrl.endsWith("/embeddings")) {
+                cleanBaseUrl
+            } else {
+                "$cleanBaseUrl/embeddings"
+            }
+        }
+
+        try {
+            val jsonBody = if (isGemini) {
+                JSONObject().apply {
+                    put("model", "models/text-embedding-004")
+                    put("content", JSONObject().apply {
+                        put("parts", JSONArray().put(JSONObject().apply {
+                            put("text", text)
+                        }))
+                    })
+                }
+            } else {
+                JSONObject().apply {
+                    put("model", "text-embedding-3-small")
+                    put("input", text)
+                }
+            }
+
+            val requestBuilder = Request.Builder()
+                .url(endpoint)
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+
+            if (!isGemini && apiKey.isNotBlank()) {
+                requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+            }
+
+            httpClient.newCall(requestBuilder.build()).execute().use { response ->
+                val bodyString = response.body?.string() ?: ""
+                if (!response.isSuccessful) {
+                    throw IOException("Embedding request failed: ${response.code} $bodyString")
+                }
+
+                val responseJson = JSONObject(bodyString)
+                val embeddingArray = if (isGemini) {
+                    // Gemini returns {embedding: {values: [...]}}
+                    responseJson.optJSONObject("embedding")?.optJSONArray("values")
+                } else {
+                    // OpenAI returns {data: [{embedding: [...]}]}
+                    responseJson.optJSONArray("data")?.optJSONObject(0)?.optJSONArray("embedding")
+                }
+
+                if (embeddingArray == null) {
+                    throw IOException("No embedding returned: $bodyString")
+                }
+
+                val embeddings = mutableListOf<Float>()
+                for (i in 0 until embeddingArray.length()) {
+                    embeddings.add((embeddingArray.getDouble(i)).toFloat())
+                }
+                return@withContext embeddings
+            }
+        } catch (e: Exception) {
+            throw IOException("Failed to generate embeddings: ${e.message}", e)
         }
     }
 }

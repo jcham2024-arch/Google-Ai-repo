@@ -20,7 +20,8 @@ class AgentOrchestrator(
     val providerRegistry: ProviderRegistry,
     private val gateway: UniversalAIGatewayImpl,
     private val toolRegistry: ToolRegistry? = null,
-    private val securityInterlock: SecurityInterlock? = null
+    private val securityInterlock: SecurityInterlock? = null,
+    private val onDelegation: ((String, String, String) -> Unit)? = null  // (fromAgent, toAgent, task)
 ) {
     private val _activeProvider = providerRegistry.activeProvider
     val activeProvider: StateFlow<com.example.data.provider.ProviderSettings?> = _activeProvider
@@ -50,12 +51,13 @@ class AgentOrchestrator(
         val resolvedModel = activeAgent?.preferredModel?.ifBlank { null } ?: modelOverride
 
         val currentProvider = activeProvider.value
-        val providerName = currentProvider?.name ?: "Google Gemini"
-        val baseUrl = currentProvider?.baseUrl ?: "https://generativelanguage.googleapis.com/"
-        val apiKey = currentProvider?.apiKey ?: ""
-        val model = resolvedModel ?: currentProvider?.defaultModel ?: "gemini-2.5-flash"
+            ?: throw IllegalStateException("No active provider configured. Please select a provider in Settings.")
+        val providerName = currentProvider.name
+        val baseUrl = currentProvider.baseUrl
+        val apiKey = currentProvider.apiKey
+        val model = resolvedModel ?: currentProvider.defaultModel
 
-        val maxTokens = currentProvider?.maxTokens ?: 4096
+        val maxTokens = currentProvider.maxTokens ?: 4096
 
         // Build tool schemas from toolRegistry
         val tools = toolRegistry?.getAllWorkers()?.values?.map { worker ->
@@ -112,11 +114,13 @@ class AgentOrchestrator(
                         }
                     ))
 
-                    // Add tool result message
+                    // Add tool result message with truncation
+                    val toolOutput = execResult.output ?: execResult.errorMessage ?: "Tool execution failed"
+                    val truncatedOutput = truncateToolResult(toolOutput, toolCall.name)
                     conversation.add(mapOf(
                         "role" to "tool",
                         "tool_call_id" to toolCall.id,
-                        "content" to execResult.output ?: execResult.errorMessage ?: "Tool execution failed"
+                        "content" to truncatedOutput
                     ))
                 }
 
@@ -224,6 +228,88 @@ class AgentOrchestrator(
                 ),
                 "required" to listOf("command")
             )
+            "read_file_range" -> mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "path" to mapOf(
+                        "type" to "string",
+                        "description" to "Relative path to the file"
+                    ),
+                    "start_line" to mapOf(
+                        "type" to "integer",
+                        "description" to "Starting line number (1-indexed)"
+                    ),
+                    "end_line" to mapOf(
+                        "type" to "integer",
+                        "description" to "Ending line number (inclusive)"
+                    )
+                ),
+                "required" to listOf("path")
+            )
+            "delegate_task" -> mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "target_agent_id" to mapOf(
+                        "type" to "string",
+                        "description" to "ID of the agent to delegate to (e.g., 'agent_builder')"
+                    ),
+                    "task_description" to mapOf(
+                        "type" to "string",
+                        "description" to "Detailed description of the task to delegate"
+                    )
+                ),
+                "required" to listOf("target_agent_id", "task_description")
+            )
+            "save_memory" -> mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "text" to mapOf(
+                        "type" to "string",
+                        "description" to "The information to remember"
+                    ),
+                    "agent_id" to mapOf(
+                        "type" to "string",
+                        "description" to "Optional agent ID to associate this memory with"
+                    )
+                ),
+                "required" to listOf("text")
+            )
+            "search_memory" -> mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "query" to mapOf(
+                        "type" to "string",
+                        "description" to "The search query"
+                    ),
+                    "agent_id" to mapOf(
+                        "type" to "string",
+                        "description" to "Optional agent ID to search memories for"
+                    ),
+                    "limit" to mapOf(
+                        "type" to "integer",
+                        "description" to "Maximum number of results (default 3)"
+                    )
+                ),
+                "required" to listOf("query")
+            )
+            "create_tool" -> mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "tool_name" to mapOf(
+                        "type" to "string",
+                        "description" to "Name of the new tool (lowercase with underscores, e.g., 'calculate_fibonacci')"
+                    ),
+                    "source_code" to mapOf(
+                        "type" to "string",
+                        "description" to "Kotlin source code for the tool's execute method"
+                    ),
+                    "description" to mapOf(
+                        "type" to "string",
+                        "description" to "Description of what the tool does"
+                    )
+                ),
+                "required" to listOf("tool_name", "source_code")
+            )
             else -> mapOf(
                 "type" to "object",
                 "properties" to mapOf(),
@@ -246,5 +332,39 @@ class AgentOrchestrator(
 
     suspend fun updateProviderSettings(settings: com.example.data.provider.ProviderSettings) {
         providerRegistry.registerOrUpdateProvider(settings)
+    }
+
+    /**
+     * Truncates tool results that exceed the character limit to prevent context window overflow.
+     * For read_file, suggests using read_file_range for large files.
+     */
+    private fun truncateToolResult(output: String, toolName: String): String {
+        val MAX_TOOL_RESULT_CHARS = 10000
+        if (output.length <= MAX_TOOL_RESULT_CHARS) {
+            return output
+        }
+        
+        val truncated = output.take(MAX_TOOL_RESULT_CHARS)
+        val warning = when (toolName) {
+            "read_file" -> "\n\n[... TRUNCATED. Output exceeds $MAX_TOOL_RESULT_CHARS characters. Use read_file_range tool to read specific line ranges of this file ...]"
+            else -> "\n\n[... TRUNCATED. Output exceeds $MAX_TOOL_RESULT_CHARS characters ...]"
+        }
+        return truncated + warning
+    }
+
+    /**
+     * Executes an agent turn with image input for multimodal capabilities.
+     */
+    suspend fun orchestrateTurnWithImage(
+        prompt: String,
+        systemInstruction: String,
+        modelOverride: String? = null,
+        imageBase64: String,
+        imageMimeType: String
+    ): AIResponse {
+        // For now, delegate to the existing orchestrateTurn with a note about the image
+        // In a full implementation, this would send the image to a vision-capable model
+        val enhancedPrompt = "$prompt\n\n[Image attached: $imageMimeType, base64 encoded]"
+        return orchestrateTurn(enhancedPrompt, systemInstruction, modelOverride)
     }
 }
