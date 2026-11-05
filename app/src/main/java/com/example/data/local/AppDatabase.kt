@@ -18,7 +18,6 @@ import com.example.data.model.ProviderConfig
 import com.example.data.model.WorkspaceFile
 import com.example.data.model.WorkspaceFileVersion
 import kotlinx.coroutines.flow.Flow
-import java.util.List
 
 @Dao
 interface ApexDao {
@@ -102,9 +101,6 @@ interface ApexDao {
 
     @Query("DELETE FROM workspace_file_versions WHERE filePath = :filePath")
     suspend fun deleteFileVersions(filePath: String)
-
-    @Query("SELECT * FROM workspace_files ORDER BY path ASC")
-    fun getAllWorkspaceFiles(): Flow<List<WorkspaceFile>>
 }
 
 @Database(entities = [AgentCard::class, ChatMessage::class, WorkspaceFile::class, Lorebook::class, ProviderConfig::class, PendingActionEntity::class, MemoryItem::class, ChatConversation::class, WorkspaceFileVersion::class], version = 9, exportSchema = false)

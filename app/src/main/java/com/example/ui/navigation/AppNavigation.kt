@@ -2,9 +2,10 @@ package com.example.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Message
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -17,6 +18,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+main
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.example.ui.agents.AgentListScreen
+import com.example.ui.chat.ChatScreen
+import com.example.ui.control.ControlCenterScreen
+import com.example.ui.graph.GraphScreen
+import com.example.ui.settings.SettingsScreen
+import com.example.ui.workspace.WorkspaceScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -41,15 +56,22 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.ChatConversation
 import com.example.domain.engine.AgentOrchestrator
 import com.example.domain.engine.AndroidApprovalPort
+Harness
+
+import androidx.compose.material.icons.filled.Dns
+import com.example.ui.settings.ProviderConfigScreen
 
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Chat : Screen("chat/{chatId}", "Agent Chat", Icons.Default.Chat)
-    object Conversations : Screen("conversations", "Conversations", Icons.Default.Message)
-    object Agents : Screen("agents", "Agent Swarm", Icons.Default.SmartToy)
+    object Chat : Screen("chat/{chatId}", "Chat", Icons.Default.Chat)
+    object Graph : Screen("graph", "Graph Tree", Icons.Default.AccountTree)
+    object Agents : Screen("agents", "Swarm", Icons.Default.SmartToy)
+    object Control : Screen("control", "Control Center", Icons.Default.Security)
     object Workspace : Screen("workspace", "Workspace", Icons.Default.Code)
-    object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+    object Providers : Screen("providers", "Providers", Icons.Default.Dns)
 
-    fun chatRoute(chatId: String) = "chat/$chatId"
+    companion object {
+        fun chatRoute(chatId: String) = "chat/$chatId"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,10 +80,11 @@ fun AppNavigation() {
     val navController = rememberNavController()
     val items = listOf(
         Screen.Chat,
-        Screen.Conversations,
+        Screen.Graph,
         Screen.Agents,
+        Screen.Control,
         Screen.Workspace,
-        Screen.Settings
+        Screen.Providers
     )
 
     Scaffold(
@@ -71,13 +94,18 @@ fun AppNavigation() {
                 val currentRoute = navBackStackEntry?.destination?.route
 
                 items.forEach { screen ->
+                    val isSelected = when (screen) {
+                        is Screen.Chat -> currentRoute?.startsWith("chat/") == true
+                        else -> currentRoute == screen.route
+                    }
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.title) },
-                        label = { Text(screen.title) },
-                        selected = currentRoute == screen.route,
+                        label = { Text(screen.title, maxLines = 1) },
+                        selected = isSelected,
                         onClick = {
-                            if (currentRoute != screen.route) {
-                                navController.navigate(screen.route) {
+                            val targetRoute = if (screen is Screen.Chat) Screen.chatRoute("default") else screen.route
+                            if (currentRoute != targetRoute) {
+                                navController.navigate(targetRoute) {
                                     popUpTo(navController.graph.findStartDestination().id) {
                                         saveState = true
                                     }
@@ -98,43 +126,19 @@ fun AppNavigation() {
         ) {
             composable(
                 route = Screen.Chat.route,
-                arguments = listOf(navArgument("chatId") { defaultValue = "default" })
+                arguments = listOf(navArgument("chatId") { 
+                    type = NavType.StringType
+                    defaultValue = "default" 
+                })
             ) { backStackEntry ->
-                val chatId = backStackEntry.getString() ?: "default"
+                val chatId = backStackEntry.arguments?.getString("chatId") ?: "default"
                 ChatScreen(chatId = chatId)
             }
-            composable(Screen.Conversations.route) { ConversationListScreen(
-                onConversationClick = { chatId ->
-                    navController.navigate(Screen.chatRoute(chatId)) {
-                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
-                onNewConversation = {
-                    val newChatId = java.util.UUID.randomUUID().toString()
-                    val scope = rememberCoroutineScope()
-                    scope.launch {
-                        val context = LocalContext.current
-                        val database = com.example.data.local.AppDatabase.getDatabase(context)
-                        val conversation = com.example.data.model.ChatConversation(
-                            id = newChatId,
-                            title = "New Conversation",
-                            createdAt = System.currentTimeMillis(),
-                            updatedAt = System.currentTimeMillis()
-                        )
-                        database.apexDao().insertConversation(conversation)
-                    }
-                    navController.navigate(Screen.chatRoute(newChatId)) {
-                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                }
-            ) }
+            composable(Screen.Graph.route) { GraphScreen() }
             composable(Screen.Agents.route) { AgentListScreen() }
+            composable(Screen.Control.route) { ControlCenterScreen() }
             composable(Screen.Workspace.route) { WorkspaceScreen() }
-            composable(Screen.Settings.route) { SettingsScreen() }
+            composable(Screen.Providers.route) { ProviderConfigScreen() }
         }
     }
 }

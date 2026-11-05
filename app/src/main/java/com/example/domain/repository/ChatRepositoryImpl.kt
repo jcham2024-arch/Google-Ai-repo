@@ -34,6 +34,6 @@ class ChatRepositoryImpl(
     }
 
     override suspend fun executeTool(toolCall: ToolCall): ExecutionResult {
-        return agentOrchestrator.executeToolCall(toolCall)
+        return agentOrchestrator.executeToolCall(toolCall.id, toolCall.toolName, toolCall.arguments)
     }
 }

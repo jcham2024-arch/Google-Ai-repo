@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.apexagentic.masterchat"
     minSdk = 24
     targetSdk = 36
-    versionCode = 5
-    versionName = "5.0"
+    versionCode = 7
+    versionName = "7.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -104,7 +104,6 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.coil.compose)
     implementation(libs.converter.moshi)
-    implementation(libs.markdown)
     implementation(libs.gson)
     implementation(libs.firebase.ai)
     implementation(libs.firebase.firestore)

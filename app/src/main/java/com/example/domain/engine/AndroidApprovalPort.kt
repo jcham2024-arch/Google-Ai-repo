@@ -30,11 +30,11 @@ class AndroidApprovalPort(
                     enhancedArgs["_old_content"] = oldContent
                     enhancedArgs["_new_content"] = newContent
                     ApprovalRequest(
-                        requestId = request.requestId,
-                        toolName = request.toolName,
-                        arguments = enhancedArgs,
-                        riskLevel = request.riskLevel,
-                        reason = enhancedReason
+                        request.requestId,
+                        request.toolName,
+                        enhancedArgs,
+                        request.riskLevel,
+                        enhancedReason
                     )
                 } else {
                     request

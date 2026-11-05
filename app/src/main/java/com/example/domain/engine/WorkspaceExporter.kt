@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -20,11 +22,11 @@ class WorkspaceExporter(private val context: Context) {
      * Creates a ZIP file of the workspace and saves it to the user's Downloads folder
      * via MediaStore. Returns the URI of the created file.
      */
-    suspend fun exportWorkspace(): Result<Uri> = withContext(ioDispatcher) {
+    suspend fun exportWorkspace(): Result<Uri> = withContext(Dispatchers.IO) {
         try {
             val workspaceDir = File(context.filesDir, "workspace")
             if (!workspaceDir.exists() || workspaceDir.listFiles()?.isEmpty() != false) {
-                return Result.failure(IllegalStateException("Workspace is empty or does not exist"))
+                return@withContext Result.failure(IllegalStateException("Workspace is empty or does not exist"))
             }
 
             // Create a unique filename with timestamp
@@ -40,11 +42,11 @@ class WorkspaceExporter(private val context: Context) {
             }
 
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                ?: return Result.failure(IOException("Failed to create MediaStore entry"))
+                ?: return@withContext Result.failure(IOException("Failed to create MediaStore entry"))
 
             resolver.openOutputStream(uri)?.use { outputStream ->
                 zipDirectory(workspaceDir, outputStream, "")
-            } ?: return Result.failure(IOException("Failed to open output stream"))
+            } ?: return@withContext Result.failure(IOException("Failed to open output stream"))
 
             Result.success(uri)
         } catch (e: Exception) {
@@ -56,11 +58,11 @@ class WorkspaceExporter(private val context: Context) {
      * Creates a ZIP file and returns it as a File (for sharing via FileProvider).
      * Use this if you want to share the file via Intent.
      */
-    suspend fun exportWorkspaceToFile(): Result<File> = withContext(ioDispatcher) {
+    suspend fun exportWorkspaceToFile(): Result<File> = withContext(Dispatchers.IO) {
         try {
             val workspaceDir = File(context.filesDir, "workspace")
             if (!workspaceDir.exists() || workspaceDir.listFiles()?.isEmpty() != false) {
-                return Result.failure(IllegalStateException("Workspace is empty or does not exist"))
+                return@withContext Result.failure(IllegalStateException("Workspace is empty or does not exist"))
             }
 
             val timestamp = System.currentTimeMillis()
@@ -84,11 +86,13 @@ class WorkspaceExporter(private val context: Context) {
             for (file in files) {
                 val entryName = if (parentPath.isEmpty()) file.name else "$parentPath/${file.name}"
                 if (file.isDirectory) {
-                    zipDirectory(file, outputStream, entryName)
+                    zipDirectory(file, zipOutputStream, entryName)
                 } else {
                     val entry = ZipEntry(entryName)
                     zipOutputStream.putNextEntry(entry)
-                    file.copyTo(zipOutputStream)
+                    file.inputStream().use { input ->
+                        input.copyTo(zipOutputStream)
+                    }
                     zipOutputStream.closeEntry()
                 }
             }

@@ -22,6 +22,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Sync
+import com.example.data.local.AppDatabase
 import com.example.data.provider.ProviderConfigurationManager
 import com.example.data.provider.ProviderPresets
 import com.example.data.provider.ProviderSettings
@@ -53,10 +58,27 @@ fun SettingsScreen(
     var providerToEditModel by remember { mutableStateOf<ProviderSettings?>(null) }
     var editModelInput by remember { mutableStateOf("") }
 
+    val context = LocalContext.current
+    val database = remember { AppDatabase.getDatabase(context) }
+    var pendingQueueCount by remember { mutableIntStateOf(0) }
+    var agentCount by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(database) {
+        database.offlineQueueDao().getPendingCountFlow().collect { count ->
+            pendingQueueCount = count
+        }
+    }
+
+    LaunchedEffect(database) {
+        database.apexDao().getAllAgents().collect { list ->
+            agentCount = list.size
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("AI Provider Settings (DataStore)") },
+                title = { Text("AI Provider Settings & Swarm Health") },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             )
         },
@@ -80,22 +102,123 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // System & Swarm Health Summary Dashboard
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "Active Agent Provider", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.NetworkCheck,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "System & Swarm Health",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Test Ping button
+                        uiState.activeProvider?.let { active ->
+                            TextButton(
+                                onClick = {
+                                    viewModel.testConnection(active.baseUrl, active.apiKey, active.defaultModel)
+                                },
+                                enabled = !uiState.isTestingConnection
+                            ) {
+                                if (uiState.isTestingConnection) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Ping...", style = MaterialTheme.typography.labelSmall)
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Test Ping", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Text(
-                        text = "${uiState.activeProvider?.name ?: "None"} (${uiState.activeProvider?.defaultModel ?: "Default"})",
+                        text = "Active Provider: ${uiState.activeProvider?.name ?: "None"} (${uiState.activeProvider?.defaultModel ?: "Default"})",
                         style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
                         text = "Base URL: ${uiState.activeProvider?.baseUrl ?: "Not set"}",
-                        style = MaterialTheme.typography.labelSmall
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    uiState.testConnectionResult?.let { msg ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (msg.contains("Successful")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Metrics Row: Pending Queue & Active Swarm Count
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Pending Queue Status
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Sync,
+                                    contentDescription = null,
+                                    tint = if (pendingQueueCount > 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Offline Sync Queue", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                            }
+                            Text(
+                                text = if (pendingQueueCount > 0) "$pendingQueueCount queued actions" else "0 pending (Synced)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (pendingQueueCount > 0) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Configured Swarm Agents
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.SmartToy,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Agent Swarm", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                            }
+                            Text(
+                                text = "$agentCount configured agents",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
 

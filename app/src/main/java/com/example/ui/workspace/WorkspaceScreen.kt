@@ -46,7 +46,7 @@ fun WorkspaceScreen() {
 
     LaunchedEffect(Unit) {
         dao.getAllWorkspaceFiles().collect { list ->
-            files = list.ifEmpty {
+            files = if (list.isEmpty()) {
                 listOf(
                     WorkspaceFile(
                         path = "workspace/README.md",
@@ -54,15 +54,15 @@ fun WorkspaceScreen() {
                         content = "# Apex Agentic Master Content\nWorkspace initialized successfully. Master Agent governs file creation and self-improvement."
                     )
                 )
+            } else {
+                list.toList()
             }
         }
     }
 
     // Load sandbox stats
     LaunchedEffect(fileGovernanceEngine) {
-        fileGovernanceEngine.getSandboxStats().let { stats ->
-            sandboxStats = stats
-        }
+        sandboxStats = fileGovernanceEngine.getSandboxStats()
     }
 
     // Observe workspace events for live sync
@@ -71,34 +71,22 @@ fun WorkspaceScreen() {
             when (event) {
                 is WorkspaceEvent.FileCreated,
                 is WorkspaceEvent.FileModified -> {
-                    // Refresh the file list from database
-                    dao.getAllWorkspaceFiles().collect { updatedFiles ->
-                        files = updatedFiles
-                    }
                     // If the currently selected file was modified, update its content
                     if (event is WorkspaceEvent.FileModified && selectedFile?.path == event.path) {
                         selectedFile = selectedFile?.copy(content = event.content)
                     }
                     // Refresh stats
-                    fileGovernanceEngine.getSandboxStats().let { stats ->
-                        sandboxStats = stats
-                    }
+                    sandboxStats = fileGovernanceEngine.getSandboxStats()
                 }
                 is WorkspaceEvent.FileDeleted -> {
-                    // Refresh the file list
-                    dao.getAllWorkspaceFiles().collect { updatedFiles ->
-                        files = updatedFiles
-                    }
                     // Clear selection if the deleted file was selected
                     if (selectedFile?.path == event.path) {
                         selectedFile = null
                     }
                     // Refresh stats
-                    fileGovernanceEngine.getSandboxStats().let { stats ->
-                        sandboxStats = stats
-                    }
+                    sandboxStats = fileGovernanceEngine.getSandboxStats()
                 }
-                null -> {} // Ignore null events
+                null -> {}
             }
         }
     }
@@ -151,7 +139,7 @@ fun WorkspaceScreen() {
                         }
                     }
                     IconButton(
-                        onClick = exportWorkspace,
+                        onClick = { exportWorkspace() },
                         enabled = !isExporting,
                         modifier = Modifier.padding(end = 16.dp)
                     ) {

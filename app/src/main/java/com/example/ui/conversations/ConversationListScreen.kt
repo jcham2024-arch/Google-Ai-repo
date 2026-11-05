@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.AppDatabase
@@ -30,13 +31,14 @@ fun ConversationListScreen(
     onNewConversation: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val dao = remember { AppDatabase.getDatabase(context).apexDao() }
 
     var conversations by remember { mutableStateOf(listOf<ChatConversation>()) }
 
     LaunchedEffect(Unit) {
         dao.getAllConversations().collect { list ->
-            conversations = list
+            conversations = list.toList()
         }
     }
 
@@ -96,12 +98,10 @@ fun ConversationListScreen(
                             conversation = conversation,
                             onClick = { onConversationClick(conversation.id) },
                             onDelete = { 
-                                val scope = rememberCoroutineScope()
-                                scope.launch { dao.deleteConversation(conversation.id) }
+                                coroutineScope.launch { dao.deleteConversation(conversation.id) }
                             },
                             onRename = { newTitle ->
-                                val scope = rememberCoroutineScope()
-                                scope.launch { 
+                                coroutineScope.launch { 
                                     dao.updateConversation(
                                         conversation.id, 
                                         newTitle, 

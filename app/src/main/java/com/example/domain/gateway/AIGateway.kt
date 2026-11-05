@@ -9,6 +9,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 data class AIResponse(
@@ -65,7 +66,7 @@ class UniversalAIGatewayImpl(private val context: Context) : AIGateway {
         maxTokens: Int,
         enableSearchGrounding: Boolean,
         allowSelfEditing: Boolean,
-        tools: List<Map<String, Any>> = emptyList()
+        tools: List<Map<String, Any>>
     ): AIResponse = withContext(Dispatchers.IO) {
         val isGemini = providerName.contains("gemini", ignoreCase = true) ||
                 baseUrl.contains("googleapis.com", ignoreCase = true)
