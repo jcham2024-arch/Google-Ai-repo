@@ -31,13 +31,16 @@ import com.example.ui.graph.GraphScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.workspace.WorkspaceScreen
 
+import androidx.compose.material.icons.filled.Dns
+import com.example.ui.settings.ProviderConfigScreen
+
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Chat : Screen("chat/{chatId}", "Chat", Icons.Default.Chat)
     object Graph : Screen("graph", "Graph Tree", Icons.Default.AccountTree)
     object Agents : Screen("agents", "Swarm", Icons.Default.SmartToy)
     object Control : Screen("control", "Control Center", Icons.Default.Security)
     object Workspace : Screen("workspace", "Workspace", Icons.Default.Code)
-    object Settings : Screen("settings", "Settings", Icons.Default.Settings)
+    object Providers : Screen("providers", "Providers", Icons.Default.Dns)
 
     companion object {
         fun chatRoute(chatId: String) = "chat/$chatId"
@@ -54,7 +57,7 @@ fun AppNavigation() {
         Screen.Agents,
         Screen.Control,
         Screen.Workspace,
-        Screen.Settings
+        Screen.Providers
     )
 
     Scaffold(
@@ -108,7 +111,7 @@ fun AppNavigation() {
             composable(Screen.Agents.route) { AgentListScreen() }
             composable(Screen.Control.route) { ControlCenterScreen() }
             composable(Screen.Workspace.route) { WorkspaceScreen() }
-            composable(Screen.Settings.route) { SettingsScreen() }
+            composable(Screen.Providers.route) { ProviderConfigScreen() }
         }
     }
 }

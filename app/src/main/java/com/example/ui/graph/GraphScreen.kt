@@ -1,6 +1,7 @@
 package com.example.ui.graph
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -40,6 +41,15 @@ import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
+import com.example.data.provider.ProviderPresets
+import com.example.data.provider.ProviderSettings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -72,6 +82,32 @@ data class NodePort(
     val isInput: Boolean
 )
 
+enum class SwarmTaskStatus {
+    RUNNING,
+    STALLED,
+    STANDBY
+}
+
+data class SwarmDelegationTask(
+    val id: String,
+    val title: String,
+    val targetNode: String,
+    var status: SwarmTaskStatus,
+    val progressPercent: Float = 0.5f,
+    val detail: String = "",
+    val timestamp: String = "Just now"
+)
+
+data class NodeSettingsProfile(
+    val providerId: String = "gemini_compat",
+    val providerName: String = "Google Gemini",
+    val model: String = "gemini-2.5-flash",
+    val agentType: String = "Orchestrator",
+    val instructions: String = "Execute tasks and coordinate node workflow in the multi-agent pipeline.",
+    val tools: List<String> = listOf("Web Search", "File System", "Code Linter"),
+    val temperature: Float = 0.7f
+)
+
 data class GraphNodeData(
     val id: String,
     var position: Offset,
@@ -81,7 +117,10 @@ data class GraphNodeData(
     val toolsCount: Int,
     val permissionLevel: String,
     val inputs: List<NodePort>,
-    val outputs: List<NodePort>
+    val outputs: List<NodePort>,
+    var swarmStatus: SwarmTaskStatus = SwarmTaskStatus.RUNNING,
+    val delegationTasks: MutableList<SwarmDelegationTask> = mutableListOf(),
+    var settings: NodeSettingsProfile = NodeSettingsProfile()
 )
 
 data class PipelineEdge(
@@ -119,7 +158,8 @@ data class SerializedNode(
     val toolsCount: Int,
     val permissionLevel: String,
     val inputs: List<NodePort>,
-    val outputs: List<NodePort>
+    val outputs: List<NodePort>,
+    val settings: NodeSettingsProfile = NodeSettingsProfile()
 )
 
 data class SerializedPipelineGraph(
@@ -165,6 +205,8 @@ fun GraphScreen() {
     var selectedTab by remember { mutableIntStateOf(0) }
     var isSwarmPaused by remember { mutableStateOf(false) }
     var selectedNodeId by remember { mutableStateOf<String?>("node_orchestrator") }
+    var activeSettingsNodeId by remember { mutableStateOf<String?>(null) }
+    val availableProviders = remember { ProviderPresets.PRESETS }
 
     // Sidebar & Dialog states
     var showTemplatesGallerySidebar by remember { mutableStateOf(false) }
@@ -256,6 +298,11 @@ fun GraphScreen() {
                 outputs = listOf(
                     NodePort("out_task", "Delegation Task", "TaskPayload", false),
                     NodePort("out_scratch", "Scratchpad Pointer", "MemoryRef", false)
+                ),
+                swarmStatus = SwarmTaskStatus.RUNNING,
+                delegationTasks = mutableListOf(
+                    SwarmDelegationTask("t1", "Auto-delegate UI Layout Spec", "Builder Agent", SwarmTaskStatus.RUNNING, 0.75f, "Writing Jetpack Compose layout canvas", "5s ago"),
+                    SwarmDelegationTask("t2", "Auto-delegate Security Audit", "Security Interlock", SwarmTaskStatus.STANDBY, 0.0f, "Awaiting builder code completion", "12s ago")
                 )
             ),
             GraphNodeData(
@@ -273,6 +320,11 @@ fun GraphScreen() {
                 outputs = listOf(
                     NodePort("out_diff", "Code Diff", "FileDiff", false),
                     NodePort("out_status_b", "Build Status", "StatusSignal", false)
+                ),
+                swarmStatus = SwarmTaskStatus.RUNNING,
+                delegationTasks = mutableListOf(
+                    SwarmDelegationTask("tb1", "Generate Compose Canvas Nodes", "Local Worker", SwarmTaskStatus.RUNNING, 0.88f, "Applying gesture matrix transforms", "2s ago"),
+                    SwarmDelegationTask("tb2", "AST rule validation", "Linter Agent", SwarmTaskStatus.STANDBY, 0.10f, "Queued in swarm executor", "8s ago")
                 )
             ),
             GraphNodeData(
@@ -288,6 +340,10 @@ fun GraphScreen() {
                 ),
                 outputs = listOf(
                     NodePort("out_approval", "Approval Token", "SecurityToken", false)
+                ),
+                swarmStatus = SwarmTaskStatus.STALLED,
+                delegationTasks = mutableListOf(
+                    SwarmDelegationTask("ts1", "L4 Policy Safety Audit Gate", "Security Gate", SwarmTaskStatus.STALLED, 0.20f, "Delegation stalled: Awaiting human override approval token", "25s ago")
                 )
             )
         )
@@ -348,7 +404,8 @@ fun GraphScreen() {
                     toolsCount = sNode.toolsCount,
                     permissionLevel = sNode.permissionLevel,
                     inputs = sNode.inputs,
-                    outputs = sNode.outputs
+                    outputs = sNode.outputs,
+                    settings = sNode.settings
                 )
             )
         }
@@ -367,7 +424,8 @@ fun GraphScreen() {
                 toolsCount = n.toolsCount,
                 permissionLevel = n.permissionLevel,
                 inputs = n.inputs,
-                outputs = n.outputs
+                outputs = n.outputs,
+                settings = n.settings
             )
         }
         val serializedGraph = SerializedPipelineGraph(
@@ -796,6 +854,9 @@ fun GraphScreen() {
                                                 )
                                             )
                                             showTemplatesGallerySidebar = true
+                                        },
+                                        onOpenNodeSettings = {
+                                            activeSettingsNodeId = node.id
                                         }
                                     )
                                 }
@@ -890,6 +951,82 @@ fun GraphScreen() {
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        // Node Configuration & Agent Swarm Inspector Overlay
+                        val selectedNodeObj = selectedNodeId?.let { selId -> nodes.find { it.id == selId } }
+                        if (selectedNodeObj != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.92f)
+                                    .align(Alignment.BottomStart)
+                                    .padding(start = 10.dp, bottom = 68.dp)
+                            ) {
+                                NodeConfigurationPanel(
+                                    node = selectedNodeObj,
+                                    onClose = { selectedNodeId = null },
+                                    onStatusChanged = { newStatus ->
+                                        val idx = nodes.indexOfFirst { it.id == selectedNodeObj.id }
+                                        if (idx != -1) {
+                                            nodes[idx] = nodes[idx].copy(swarmStatus = newStatus)
+                                        }
+                                    },
+                                    onAddSubTask = {
+                                        val idx = nodes.indexOfFirst { it.id == selectedNodeObj.id }
+                                        if (idx != -1) {
+                                            val currentTasks = nodes[idx].delegationTasks.toMutableList()
+                                            currentTasks.add(
+                                                SwarmDelegationTask(
+                                                    id = "sub_${System.currentTimeMillis()}",
+                                                    title = "Auto-delegate sub-task #${currentTasks.size + 1}",
+                                                    targetNode = "Peer Agent",
+                                                    status = SwarmTaskStatus.RUNNING,
+                                                    progressPercent = 0.5f,
+                                                    detail = "Processing in parallel swarm queue",
+                                                    timestamp = "Just now"
+                                                )
+                                            )
+                                            nodes[idx] = nodes[idx].copy(delegationTasks = currentTasks, swarmStatus = SwarmTaskStatus.RUNNING)
+                                        }
+                                    },
+                                    onRetryStalled = {
+                                        val idx = nodes.indexOfFirst { it.id == selectedNodeObj.id }
+                                        if (idx != -1) {
+                                            val currentTasks = nodes[idx].delegationTasks.map { task ->
+                                                if (task.status == SwarmTaskStatus.STALLED) task.copy(status = SwarmTaskStatus.RUNNING, detail = "Resumed after lock retry")
+                                                else task
+                                            }.toMutableList()
+                                            nodes[idx] = nodes[idx].copy(delegationTasks = currentTasks, swarmStatus = SwarmTaskStatus.RUNNING)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        // Right Slide-Out Node Settings Drawer Tab Overlay
+                        val settingsNodeObj = activeSettingsNodeId?.let { sId -> nodes.find { it.id == sId } }
+                        if (settingsNodeObj != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .align(Alignment.CenterEnd)
+                            ) {
+                                NodeSettingsRightDrawer(
+                                    node = settingsNodeObj,
+                                    availableProviders = availableProviders,
+                                    onClose = { activeSettingsNodeId = null },
+                                    onSaveSettings = { updatedProfile ->
+                                        val idx = nodes.indexOfFirst { it.id == settingsNodeObj.id }
+                                        if (idx != -1) {
+                                            nodes[idx] = nodes[idx].copy(
+                                                name = "${updatedProfile.agentType} Node",
+                                                role = updatedProfile.agentType,
+                                                settings = updatedProfile
+                                            )
+                                        }
+                                    }
+                                )
                             }
                         }
 
@@ -1298,7 +1435,8 @@ fun InteractiveCanvasNodeCard(
     onInputPortClick: (NodePort) -> Unit,
     onDeleteNode: () -> Unit,
     onDuplicateNode: () -> Unit = {},
-    onSaveToTemplates: () -> Unit = {}
+    onSaveToTemplates: () -> Unit = {},
+    onOpenNodeSettings: () -> Unit = {}
 ) {
     val statusColor = when (node.status) {
         "RUNNING" -> MaterialTheme.colorScheme.primary
@@ -1367,6 +1505,18 @@ fun InteractiveCanvasNodeCard(
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     IconButton(
+                        onClick = onOpenNodeSettings,
+                        modifier = Modifier.size(16.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Open Node Settings Tab",
+                            modifier = Modifier.size(10.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    IconButton(
                         onClick = onSaveToTemplates,
                         modifier = Modifier.size(16.dp)
                     ) {
@@ -1416,6 +1566,46 @@ fun InteractiveCanvasNodeCard(
             }
 
             Spacer(modifier = Modifier.height(4.dp))
+
+            // Agent Swarm Auto-Delegation Status Pill
+            val swarmBadgeColor = when (node.swarmStatus) {
+                SwarmTaskStatus.RUNNING -> MaterialTheme.colorScheme.primary
+                SwarmTaskStatus.STALLED -> MaterialTheme.colorScheme.error
+                SwarmTaskStatus.STANDBY -> MaterialTheme.colorScheme.secondary
+            }
+            val swarmBadgeText = when (node.swarmStatus) {
+                SwarmTaskStatus.RUNNING -> "Swarm: RUNNING (${node.delegationTasks.size})"
+                SwarmTaskStatus.STALLED -> "Swarm: STALLED (!)"
+                SwarmTaskStatus.STANDBY -> "Swarm: STANDBY"
+            }
+
+            Surface(
+                color = swarmBadgeColor.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(swarmBadgeColor)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = swarmBadgeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 6.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = swarmBadgeColor
+                    )
+                }
+            }
 
             // Capability Badge
             Surface(
@@ -1540,6 +1730,707 @@ fun InteractiveCanvasNodeCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun AgentSwarmTaskStatusIndicator(
+    swarmStatus: SwarmTaskStatus,
+    taskCount: Int,
+    stalledCount: Int,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "swarm_indicator_anim")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(750, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    val (containerColor, contentColor, icon, titleText, subText) = when (swarmStatus) {
+        SwarmTaskStatus.RUNNING -> Triple(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            Icons.Default.PlayArrow
+        ).let { (c1, c2, ic) ->
+            listOf(c1, c2, ic, "SWARM RUNNING", "$taskCount auto-delegation sub-task(s) active in parallel pipeline")
+        }
+        SwarmTaskStatus.STALLED -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            Icons.Default.Warning
+        ).let { (c1, c2, ic) ->
+            listOf(c1, c2, ic, "DELEGATION STALLED", "$stalledCount task(s) stalled: waiting for lock resolution or policy gate")
+        }
+        SwarmTaskStatus.STANDBY -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Default.Pause
+        ).let { (c1, c2, ic) ->
+            listOf(c1, c2, ic, "SWARM STANDBY", "Swarm node standby: idle awaiting orchestrator dispatch")
+        }
+    }
+
+    val cColor = containerColor as Color
+    val txtColor = contentColor as Color
+    val iconVec = icon as androidx.compose.ui.graphics.vector.ImageVector
+    val titleStr = titleText as String
+    val subStr = subText as String
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = cColor,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(
+            1.dp,
+            if (swarmStatus == SwarmTaskStatus.STALLED) MaterialTheme.colorScheme.error.copy(alpha = pulseAlpha)
+            else MaterialTheme.colorScheme.outlineVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Glowing Indicator Ring
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (swarmStatus == SwarmTaskStatus.RUNNING) txtColor.copy(alpha = 0.2f * pulseAlpha)
+                        else if (swarmStatus == SwarmTaskStatus.STALLED) MaterialTheme.colorScheme.error.copy(alpha = 0.3f * pulseAlpha)
+                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (swarmStatus == SwarmTaskStatus.RUNNING) txtColor
+                            else if (swarmStatus == SwarmTaskStatus.STALLED) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.outline
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = iconVec,
+                        contentDescription = null,
+                        modifier = Modifier.size(10.dp),
+                        tint = MaterialTheme.colorScheme.surface
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = titleStr,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = txtColor,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = txtColor.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = swarmStatus.name,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = txtColor,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subStr,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.sp,
+                    color = txtColor.copy(alpha = 0.85f)
+                )
+
+                if (swarmStatus == SwarmTaskStatus.RUNNING) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = txtColor,
+                        trackColor = txtColor.copy(alpha = 0.2f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NodeConfigurationPanel(
+    node: GraphNodeData,
+    onClose: () -> Unit,
+    onStatusChanged: (SwarmTaskStatus) -> Unit,
+    onAddSubTask: () -> Unit,
+    onRetryStalled: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(14.dp)
+                .fillMaxWidth()
+        ) {
+            // Header Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.SmartToy,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Agent Node Config: ${node.name}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${node.role} • ${node.permissionLevel}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close Config", modifier = Modifier.size(18.dp))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Primary Visual Indicator: Agent Swarm Auto-Delegation Status
+            Text(
+                text = "Agent Swarm Auto-Delegation Status",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+
+            val stalledCount = node.delegationTasks.count { it.status == SwarmTaskStatus.STALLED }
+            AgentSwarmTaskStatusIndicator(
+                swarmStatus = node.swarmStatus,
+                taskCount = node.delegationTasks.size,
+                stalledCount = stalledCount
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Interactive Status Switcher (Chips)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Force Swarm Status:",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+
+                FilterChip(
+                    selected = node.swarmStatus == SwarmTaskStatus.RUNNING,
+                    onClick = { onStatusChanged(SwarmTaskStatus.RUNNING) },
+                    label = { Text("Running", fontSize = 10.sp) },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                )
+
+                FilterChip(
+                    selected = node.swarmStatus == SwarmTaskStatus.STALLED,
+                    onClick = { onStatusChanged(SwarmTaskStatus.STALLED) },
+                    label = { Text("Stalled", fontSize = 10.sp) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(10.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                )
+
+                FilterChip(
+                    selected = node.swarmStatus == SwarmTaskStatus.STANDBY,
+                    onClick = { onStatusChanged(SwarmTaskStatus.STANDBY) },
+                    label = { Text("Standby", fontSize = 10.sp) },
+                    leadingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.outline)
+                        )
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Sub-Tasks Breakdown Section
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Auto-Delegation Tasks (${node.delegationTasks.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (stalledCount > 0) {
+                        OutlinedButton(
+                            onClick = onRetryStalled,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(26.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Retry Stalled", fontSize = 9.sp, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+
+                    Button(
+                        onClick = onAddSubTask,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(26.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Sub-Task", fontSize = 9.sp)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (node.delegationTasks.isEmpty()) {
+                Text(
+                    text = "No active auto-delegation tasks configured for this agent node.",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    node.delegationTasks.forEach { task ->
+                        val taskColor = when (task.status) {
+                            SwarmTaskStatus.RUNNING -> MaterialTheme.colorScheme.primary
+                            SwarmTaskStatus.STALLED -> MaterialTheme.colorScheme.error
+                            SwarmTaskStatus.STANDBY -> MaterialTheme.colorScheme.secondary
+                        }
+
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(taskColor)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = task.title,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
+                                    Surface(
+                                        color = taskColor.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = task.status.name,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = taskColor,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 8.sp,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+
+                                if (task.detail.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = task.detail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 10.sp,
+                                        color = if (task.status == SwarmTaskStatus.STALLED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Target: ${task.targetNode} • Updated ${task.timestamp}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+
+                                    if (task.status == SwarmTaskStatus.STALLED) {
+                                        TextButton(
+                                            onClick = {
+                                                task.status = SwarmTaskStatus.RUNNING
+                                                node.swarmStatus = SwarmTaskStatus.RUNNING
+                                            },
+                                            contentPadding = PaddingValues(0.dp),
+                                            modifier = Modifier.height(20.dp)
+                                        ) {
+                                            Text("Resume Task", fontSize = 9.sp, color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NodeSettingsRightDrawer(
+    node: GraphNodeData,
+    availableProviders: List<ProviderSettings>,
+    onClose: () -> Unit,
+    onSaveSettings: (NodeSettingsProfile) -> Unit
+) {
+    var selectedProviderId by remember(node.settings) { mutableStateOf(node.settings.providerId) }
+    var selectedModel by remember(node.settings) { mutableStateOf(node.settings.model) }
+    var selectedAgentType by remember(node.settings) { mutableStateOf(node.settings.agentType) }
+    var instructionsText by remember(node.settings) { mutableStateOf(node.settings.instructions) }
+    var selectedTools by remember(node.settings) { mutableStateOf(node.settings.tools.toSet()) }
+
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    Surface(
+        modifier = Modifier
+            .width(340.dp)
+            .fillMaxHeight(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 12.dp,
+        shadowElevation = 12.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp)
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Node Settings Tab",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${node.name} (${node.id})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close Settings Tab", modifier = Modifier.size(18.dp))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Sub-navigation Tabs
+            SecondaryTabRow(selectedTabIndex = selectedTab) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text("Provider/Model", fontSize = 10.sp) }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text("Instructions", fontSize = 10.sp) }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text("Tools", fontSize = 10.sp) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                when (selectedTab) {
+                    0 -> {
+                        Text(
+                            text = "Configured Providers (from App Home Menu)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        availableProviders.forEach { prov ->
+                            val isChosen = prov.id == selectedProviderId
+                            Card(
+                                onClick = { selectedProviderId = prov.id },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isChosen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(10.dp)
+                                        .fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(text = prov.name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        Text(text = prov.baseUrl, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.outline)
+                                    }
+                                    if (isChosen) {
+                                        Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "Node Model Selection",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        val commonModels = listOf("gemini-2.5-flash", "gemini-2.5-pro", "gpt-4o", "claude-3-5-sonnet", "llama3.2:latest", "deepseek-coder-v2")
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(commonModels) { m ->
+                                FilterChip(
+                                    selected = selectedModel == m,
+                                    onClick = { selectedModel = m },
+                                    label = { Text(m, fontSize = 9.sp) }
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = selectedModel,
+                            onValueChange = { selectedModel = it },
+                            label = { Text("Model Identifier") },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            singleLine = true
+                        )
+                    }
+
+                    1 -> {
+                        Text(
+                            text = "Agent Type & Persona",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        val agentTypes = listOf("Orchestrator", "Code Generator", "Linter", "Security Auditor", "Database Architect", "Custom Agent")
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(agentTypes) { type ->
+                                FilterChip(
+                                    selected = selectedAgentType == type,
+                                    onClick = { selectedAgentType = type },
+                                    label = { Text(type, fontSize = 9.sp) }
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = selectedAgentType,
+                            onValueChange = { selectedAgentType = it },
+                            label = { Text("Agent Type") },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "Node System Instructions",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        OutlinedTextField(
+                            value = instructionsText,
+                            onValueChange = { instructionsText = it },
+                            label = { Text("Instructions / System Prompt") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp),
+                            textStyle = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    2 -> {
+                        Text(
+                            text = "Node Capabilities & Allowed Tools",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        val allTools = listOf(
+                            "Web Search Grounding",
+                            "File System Read/Write",
+                            "Code Linter & AST Checker",
+                            "Database Query Engine",
+                            "Terminal Execution",
+                            "Security Interlock Gate",
+                            "Scratchpad Memory Pointer"
+                        )
+
+                        allTools.forEach { t ->
+                            val isChecked = selectedTools.contains(t)
+                            Card(
+                                onClick = {
+                                    selectedTools = if (isChecked) selectedTools - t else selectedTools + t
+                                },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHigh
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(10.dp)
+                                        .fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(text = t, style = MaterialTheme.typography.labelMedium, fontSize = 11.sp)
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = {
+                                            selectedTools = if (it) selectedTools + t else selectedTools - t
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Button(
+                onClick = {
+                    val provName = availableProviders.find { it.id == selectedProviderId }?.name ?: selectedProviderId
+                    val updatedProfile = NodeSettingsProfile(
+                        providerId = selectedProviderId,
+                        providerName = provName,
+                        model = selectedModel,
+                        agentType = selectedAgentType,
+                        instructions = instructionsText,
+                        tools = selectedTools.toList()
+                    )
+                    onSaveSettings(updatedProfile)
+                    onClose()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Save Node Settings")
             }
         }
     }
