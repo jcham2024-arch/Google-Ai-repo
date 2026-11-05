@@ -15,11 +15,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CenterFocusWeak
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Info
@@ -32,6 +37,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.*
@@ -56,7 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
-import com.google.gson.reflect.TypeToken
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -89,6 +94,21 @@ data class PipelineEdge(
     var isActive: Boolean = true
 )
 
+data class ValidationResult(
+    val isValid: Boolean,
+    val reason: String
+)
+
+data class NodeTemplateItem(
+    val id: String,
+    val name: String,
+    val role: String,
+    val toolsCount: Int,
+    val permissionLevel: String,
+    val inputs: List<NodePort>,
+    val outputs: List<NodePort>
+)
+
 data class SerializedNode(
     val id: String,
     val posX: Float,
@@ -110,6 +130,34 @@ data class SerializedPipelineGraph(
     val pipelines: List<PipelineEdge>
 )
 
+fun validateEdgeTypeCompatibility(
+    edge: PipelineEdge,
+    nodes: List<GraphNodeData>
+): ValidationResult {
+    val fromNode = nodes.find { it.id == edge.fromNodeId } ?: return ValidationResult(false, "Source node missing")
+    val toNode = nodes.find { it.id == edge.toNodeId } ?: return ValidationResult(false, "Target node missing")
+
+    val fromPort = fromNode.outputs.find { it.id == edge.fromPortId }
+    val toPort = toNode.inputs.find { it.id == edge.toPortId }
+
+    if (fromPort == null || toPort == null) {
+        return ValidationResult(false, "Mismatched port endpoints")
+    }
+
+    val srcType = fromPort.dataType
+    val targetType = toPort.dataType
+
+    if (srcType == "Text" || targetType == "Text" || srcType == "Any" || targetType == "Any") {
+        return ValidationResult(true, "Compatible (Generic payload)")
+    }
+
+    if (srcType.equals(targetType, ignoreCase = true)) {
+        return ValidationResult(true, "Compatible ($srcType)")
+    }
+
+    return ValidationResult(false, "Type mismatch: Source produces '$srcType' but Target expects '$targetType'")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GraphScreen() {
@@ -118,23 +166,79 @@ fun GraphScreen() {
     var isSwarmPaused by remember { mutableStateOf(false) }
     var selectedNodeId by remember { mutableStateOf<String?>("node_orchestrator") }
 
-    // Dialog state for Export / Import JSON
+    // Sidebar & Dialog states
+    var showTemplatesGallerySidebar by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var showValidationErrorModal by remember { mutableStateOf<String?>(null) }
     var importJsonInput by remember { mutableStateOf("") }
     var importErrorMessage by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
 
-    // Canvas Pan & Zoom states
+    // Canvas Pan & Zoom
     var panOffset by remember { mutableStateOf(Offset(0f, 0f)) }
     var zoomScale by remember { mutableFloatStateOf(1.0f) }
 
-    // Interactive Connection State
+    // Interactive Connection
     var activeSourcePort by remember { mutableStateOf<Pair<String, String>?>(null) }
     var draftTargetPos by remember { mutableStateOf<Offset?>(null) }
 
-    // Initial Node Graph
+    // Saved Node Templates Gallery
+    val savedTemplates = remember {
+        mutableStateListOf(
+            NodeTemplateItem(
+                id = "tmpl_orchestrator",
+                name = "Orchestrator Agent",
+                role = "Master Coordinator",
+                toolsCount = 10,
+                permissionLevel = "L1-L4 Permissive",
+                inputs = listOf(NodePort("in_g", "Goal Prompt", "Text", true)),
+                outputs = listOf(
+                    NodePort("out_t", "Delegation Task", "TaskPayload", false),
+                    NodePort("out_s", "Scratchpad Pointer", "MemoryRef", false)
+                )
+            ),
+            NodeTemplateItem(
+                id = "tmpl_ui_builder",
+                name = "Compose UI Builder",
+                role = "Jetpack Compose Engineer",
+                toolsCount = 5,
+                permissionLevel = "L3 Read-Write",
+                inputs = listOf(NodePort("in_ui", "UI Spec", "TaskPayload", true)),
+                outputs = listOf(NodePort("out_ui", "Compose Code", "FileDiff", false))
+            ),
+            NodeTemplateItem(
+                id = "tmpl_db_agent",
+                name = "Database Schema Agent",
+                role = "Room / Firestore Architect",
+                toolsCount = 3,
+                permissionLevel = "L3 Read-Write",
+                inputs = listOf(NodePort("in_db", "DB Spec", "TaskPayload", true)),
+                outputs = listOf(NodePort("out_db", "Entity Schema", "FileDiff", false))
+            ),
+            NodeTemplateItem(
+                id = "tmpl_security",
+                name = "Security Interlock Gate",
+                role = "Safety & Policy Auditor",
+                toolsCount = 2,
+                permissionLevel = "L4 Approval Interlock",
+                inputs = listOf(NodePort("in_sec", "Action Request", "ToolCallPayload", true)),
+                outputs = listOf(NodePort("out_sec", "Approval Token", "SecurityToken", false))
+            ),
+            NodeTemplateItem(
+                id = "tmpl_linter",
+                name = "Static Linter Agent",
+                role = "Syntax & Rule Checker",
+                toolsCount = 2,
+                permissionLevel = "L2 Read-Only",
+                inputs = listOf(NodePort("in_lint", "Source Code", "TaskPayload", true)),
+                outputs = listOf(NodePort("out_lint", "Issues List", "IssuesReport", false))
+            )
+        )
+    }
+
+    // Initial Graph
     val nodes = remember {
         mutableStateListOf(
             GraphNodeData(
@@ -212,6 +316,11 @@ fun GraphScreen() {
         )
     }
 
+    val invalidConnections = remember(nodes, pipelines.toList()) {
+        pipelines.map { edge -> edge to validateEdgeTypeCompatibility(edge, nodes) }
+            .filter { !it.second.isValid }
+    }
+
     val density = LocalDensity.current
 
     val infiniteTransition = rememberInfiniteTransition(label = "pipeline_flow")
@@ -225,7 +334,6 @@ fun GraphScreen() {
         label = "phase"
     )
 
-    // Helper to load serialized graph
     fun loadGraphFromSerialized(serialized: SerializedPipelineGraph) {
         nodes.clear()
         pipelines.clear()
@@ -247,7 +355,6 @@ fun GraphScreen() {
         pipelines.addAll(serialized.pipelines)
     }
 
-    // Helper to generate current JSON
     fun exportCurrentGraphJson(): String {
         val serializedNodes = nodes.map { n ->
             SerializedNode(
@@ -284,12 +391,19 @@ fun GraphScreen() {
                     }
                 },
                 actions = {
-                    // Export Pipeline JSON
+                    // Templates Gallery Sidebar Toggle
+                    IconButton(onClick = { showTemplatesGallerySidebar = !showTemplatesGallerySidebar }) {
+                        Icon(
+                            Icons.Default.Extension,
+                            contentDescription = "Templates Gallery",
+                            tint = if (showTemplatesGallerySidebar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                    }
+
                     IconButton(onClick = { showExportDialog = true }) {
                         Icon(Icons.Default.Download, contentDescription = "Export Graph JSON", tint = MaterialTheme.colorScheme.primary)
                     }
 
-                    // Import Pre-defined Pipeline
                     IconButton(onClick = {
                         importJsonInput = ""
                         importErrorMessage = null
@@ -298,14 +412,12 @@ fun GraphScreen() {
                         Icon(Icons.Default.Upload, contentDescription = "Import Pipeline Template", tint = MaterialTheme.colorScheme.primary)
                     }
 
-                    // Force-Directed Auto-Layout
                     IconButton(onClick = {
                         runForceDirectedAutoLayout(nodes, pipelines)
                     }) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = "Auto Layout", tint = MaterialTheme.colorScheme.primary)
                     }
 
-                    // Recenter Canvas
                     IconButton(onClick = {
                         panOffset = Offset(0f, 0f)
                         zoomScale = 1.0f
@@ -313,7 +425,6 @@ fun GraphScreen() {
                         Icon(Icons.Default.CenterFocusWeak, contentDescription = "Recenter View")
                     }
 
-                    // Global Swarm Pause
                     IconButton(onClick = { isSwarmPaused = !isSwarmPaused }) {
                         Icon(
                             imageVector = if (isSwarmPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
@@ -370,6 +481,51 @@ fun GraphScreen() {
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
                             label = { Text("Scratchpad") }
+                        )
+                    }
+                }
+            }
+
+            // Live Pipeline Validation Status Bar
+            if (invalidConnections.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            showValidationErrorModal = invalidConnections.first().second.reason
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "TYPE VALIDATION ERROR: ${invalidConnections.size} invalid connection(s) highlighted in RED (${invalidConnections.first().second.reason})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else if (pipelines.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "VALIDATION PASSED: All ${pipelines.size} connection port data types are compatible.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -446,6 +602,7 @@ fun GraphScreen() {
                         val outlineColor = MaterialTheme.colorScheme.outlineVariant
                         val activePipeColor = MaterialTheme.colorScheme.tertiary
                         val inactivePipeColor = MaterialTheme.colorScheme.outline
+                        val errorPipeColor = MaterialTheme.colorScheme.error
                         val draftPipeColor = MaterialTheme.colorScheme.primary
 
                         Box(
@@ -502,9 +659,14 @@ fun GraphScreen() {
                                             )
                                         }
 
-                                        val color = if (edge.isActive) activePipeColor else inactivePipeColor
-                                        val strokeWidth = if (edge.isActive) 3.5f else 2f
-                                        val pathEffect = if (edge.isActive) {
+                                        val validation = validateEdgeTypeCompatibility(edge, nodes)
+                                        val isInvalid = !validation.isValid
+
+                                        val color = if (isInvalid) errorPipeColor else if (edge.isActive) activePipeColor else inactivePipeColor
+                                        val strokeWidth = if (isInvalid) 4.5f else if (edge.isActive) 3.5f else 2f
+                                        val pathEffect = if (isInvalid) {
+                                            PathEffect.dashPathEffect(floatArrayOf(10f, 10f), phaseAnim)
+                                        } else if (edge.isActive) {
                                             PathEffect.dashPathEffect(floatArrayOf(20f, 15f), phaseAnim)
                                         } else null
 
@@ -514,8 +676,8 @@ fun GraphScreen() {
                                             style = Stroke(width = strokeWidth, pathEffect = pathEffect)
                                         )
 
-                                        drawCircle(color = color, radius = 6f, center = Offset(fromX, fromY))
-                                        drawCircle(color = color, radius = 6f, center = Offset(toX, toY))
+                                        drawCircle(color = color, radius = if (isInvalid) 8f else 6f, center = Offset(fromX, fromY))
+                                        drawCircle(color = color, radius = if (isInvalid) 8f else 6f, center = Offset(toX, toY))
                                     }
                                 }
 
@@ -597,8 +759,136 @@ fun GraphScreen() {
                                         onDeleteNode = {
                                             nodes.remove(node)
                                             pipelines.removeAll { it.fromNodeId == node.id || it.toNodeId == node.id }
+                                        },
+                                        onDuplicateNode = {
+                                            val newId = "node_${System.currentTimeMillis()}"
+                                            val dupInputs = node.inputs.mapIndexed { idx, port ->
+                                                port.copy(id = "in_${newId}_$idx")
+                                            }
+                                            val dupOutputs = node.outputs.mapIndexed { idx, port ->
+                                                port.copy(id = "out_${newId}_$idx")
+                                            }
+                                            val duplicateNode = GraphNodeData(
+                                                id = newId,
+                                                position = Offset(node.position.x + 35f, node.position.y + 35f),
+                                                name = "${node.name} (Copy)",
+                                                role = node.role,
+                                                status = "IDLE",
+                                                toolsCount = node.toolsCount,
+                                                permissionLevel = node.permissionLevel,
+                                                inputs = dupInputs,
+                                                outputs = dupOutputs
+                                            )
+                                            nodes.add(duplicateNode)
+                                            selectedNodeId = newId
+                                        },
+                                        onSaveToTemplates = {
+                                            val tmplId = "tmpl_${System.currentTimeMillis()}"
+                                            savedTemplates.add(
+                                                NodeTemplateItem(
+                                                    id = tmplId,
+                                                    name = node.name,
+                                                    role = node.role,
+                                                    toolsCount = node.toolsCount,
+                                                    permissionLevel = node.permissionLevel,
+                                                    inputs = node.inputs,
+                                                    outputs = node.outputs
+                                                )
+                                            )
+                                            showTemplatesGallerySidebar = true
                                         }
                                     )
+                                }
+                            }
+                        }
+
+                        // Templates Gallery Sidebar Drawer Overlay
+                        if (showTemplatesGallerySidebar) {
+                            Surface(
+                                modifier = Modifier
+                                    .width(220.dp)
+                                    .fillMaxHeight()
+                                    .align(Alignment.CenterStart),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                tonalElevation = 8.dp,
+                                shadowElevation = 8.dp
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Extension, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Node Templates", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                        }
+                                        IconButton(onClick = { showTemplatesGallerySidebar = false }, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.Default.Close, contentDescription = "Close Sidebar", modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+
+                                    Text(
+                                        text = "Tap 'Drop on Canvas' to reuse any saved node configuration.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        items(savedTemplates) { tmpl ->
+                                            Card(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Text(text = tmpl.name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                                    Text(text = tmpl.role, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(text = "${tmpl.toolsCount} Tools • ${tmpl.permissionLevel}", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp)
+                                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                                    Button(
+                                                        onClick = {
+                                                            val newId = "node_${System.currentTimeMillis()}"
+                                                            val cloneInputs = tmpl.inputs.mapIndexed { idx, p -> p.copy(id = "in_${newId}_$idx") }
+                                                            val cloneOutputs = tmpl.outputs.mapIndexed { idx, p -> p.copy(id = "out_${newId}_$idx") }
+                                                            val newNode = GraphNodeData(
+                                                                id = newId,
+                                                                position = Offset(200f, 200f),
+                                                                name = tmpl.name,
+                                                                role = tmpl.role,
+                                                                status = "IDLE",
+                                                                toolsCount = tmpl.toolsCount,
+                                                                permissionLevel = tmpl.permissionLevel,
+                                                                inputs = cloneInputs,
+                                                                outputs = cloneOutputs
+                                                            )
+                                                            nodes.add(newNode)
+                                                            selectedNodeId = newId
+                                                        },
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        contentPadding = PaddingValues(vertical = 2.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Drop on Canvas", style = MaterialTheme.typography.labelSmall)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -729,7 +1019,7 @@ fun GraphScreen() {
         }
     }
 
-    // Modal Dialog for Exporting JSON
+    // Export Dialog
     if (showExportDialog) {
         val currentJson = remember { exportCurrentGraphJson() }
         AlertDialog(
@@ -779,7 +1069,7 @@ fun GraphScreen() {
         )
     }
 
-    // Modal Dialog for Importing Pipeline Templates & Custom JSON
+    // Import Dialog
     if (showImportDialog) {
         AlertDialog(
             onDismissRequest = { showImportDialog = false },
@@ -797,7 +1087,6 @@ fun GraphScreen() {
                 ) {
                     Text("Select Built-In Pipeline Template:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
 
-                    // Template 1: Full-Stack App Generator
                     OutlinedButton(
                         onClick = {
                             val templateJson = """
@@ -822,21 +1111,18 @@ fun GraphScreen() {
                         Text("Template 1: Full-Stack App Generator", style = MaterialTheme.typography.labelSmall)
                     }
 
-                    // Template 2: Code Review & Refactoring Swarm
                     OutlinedButton(
                         onClick = {
                             val templateJson = """
                             {
                               "version": 1,
-                              "name": "Code Review & Refactoring Swarm",
+                              "name": "Mismatched Connection Test",
                               "nodes": [
                                 {"id": "node_orchestrator", "posX": 60.0, "posY": 100.0, "name": "Orchestrator Agent", "role": "Master Coordinator", "status": "RUNNING", "toolsCount": 10, "permissionLevel": "L1-L4 Permissive", "inputs": [{"id": "in_goal", "name": "Goal", "dataType": "Text", "isInput": true}], "outputs": [{"id": "out_task", "name": "Task", "dataType": "TaskPayload", "isInput": false}]},
-                                {"id": "node_linter", "posX": 440.0, "posY": 60.0, "name": "Static Linter Agent", "role": "Lint & Syntax Analyzer", "status": "IDLE", "toolsCount": 2, "permissionLevel": "L2 Read-Only", "inputs": [{"id": "in_src", "name": "Source Code", "dataType": "TaskPayload", "isInput": true}], "outputs": [{"id": "out_issues", "name": "Lint Errors", "dataType": "IssuesReport", "isInput": false}]},
-                                {"id": "node_patcher", "posX": 820.0, "posY": 160.0, "name": "Patch Writer Agent", "role": "Automated Refactorer", "status": "IDLE", "toolsCount": 4, "permissionLevel": "L3 Read-Write", "inputs": [{"id": "in_issues", "name": "Lint Errors", "dataType": "IssuesReport", "isInput": true}], "outputs": [{"id": "out_patch", "name": "Code Patch", "dataType": "FileDiff", "isInput": false}]}
+                                {"id": "node_security", "posX": 440.0, "posY": 100.0, "name": "Security Interlock", "role": "Safety Gate", "status": "IDLE", "toolsCount": 2, "permissionLevel": "L4 Approval Interlock", "inputs": [{"id": "in_action", "name": "Action Request", "dataType": "ToolCallPayload", "isInput": true}], "outputs": [{"id": "out_approval", "name": "Approval Token", "dataType": "SecurityToken", "isInput": false}]}
                               ],
                               "pipelines": [
-                                {"id": "p1", "fromNodeId": "node_orchestrator", "fromPortId": "out_task", "toNodeId": "node_linter", "toPortId": "in_src", "label": "analyze_src", "isActive": true},
-                                {"id": "p2", "fromNodeId": "node_linter", "fromPortId": "out_issues", "toNodeId": "node_patcher", "toPortId": "in_issues", "label": "fix_issues", "isActive": true}
+                                {"id": "p_invalid", "fromNodeId": "node_orchestrator", "fromPortId": "out_task", "toNodeId": "node_security", "toPortId": "in_action", "label": "mismatched_pipe", "isActive": true}
                               ]
                             }
                             """.trimIndent()
@@ -844,7 +1130,7 @@ fun GraphScreen() {
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Template 2: Code Review & Refactor Swarm", style = MaterialTheme.typography.labelSmall)
+                        Text("Template 2: Mismatched Connection Test (Highlight RED)", style = MaterialTheme.typography.labelSmall)
                     }
 
                     Text("Or Paste Custom Pipeline JSON:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
@@ -893,6 +1179,37 @@ fun GraphScreen() {
             dismissButton = {
                 TextButton(onClick = { showImportDialog = false }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Modal Dialog for Validation Errors
+    showValidationErrorModal?.let { errorDetails ->
+        AlertDialog(
+            onDismissRequest = { showValidationErrorModal = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Pipeline Validation Error")
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("The graph contains incompatible port type connections highlighted in RED.")
+                    Text(
+                        text = "Reason: $errorDetails",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Text("Please disconnect or re-wire the invalid pipeline connections before executing the agent swarm.")
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showValidationErrorModal = null }) {
+                    Text("Understood")
                 }
             }
         )
@@ -979,7 +1296,9 @@ fun InteractiveCanvasNodeCard(
     onSelect: () -> Unit,
     onOutputPortClick: (NodePort) -> Unit,
     onInputPortClick: (NodePort) -> Unit,
-    onDeleteNode: () -> Unit
+    onDeleteNode: () -> Unit,
+    onDuplicateNode: () -> Unit = {},
+    onSaveToTemplates: () -> Unit = {}
 ) {
     val statusColor = when (node.status) {
         "RUNNING" -> MaterialTheme.colorScheme.primary
@@ -1043,7 +1362,34 @@ fun InteractiveCanvasNodeCard(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    IconButton(
+                        onClick = onSaveToTemplates,
+                        modifier = Modifier.size(16.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.BookmarkBorder,
+                            contentDescription = "Save to Templates Gallery",
+                            modifier = Modifier.size(10.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDuplicateNode,
+                        modifier = Modifier.size(16.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = "Duplicate Node Card",
+                            modifier = Modifier.size(10.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
                     Surface(
                         color = statusColor.copy(alpha = 0.2f),
                         shape = RoundedCornerShape(8.dp)
