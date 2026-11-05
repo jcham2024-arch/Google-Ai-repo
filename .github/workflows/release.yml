@@ -1,5 +1,13 @@
 name: Release Workflow
 
+# A release tag must produce signed, installable artifacts. The upload keystore is read from
+# repository secrets and written outside the checkout; nothing secret is committed.
+#
+# Required repository secrets:
+#   RELEASE_KEYSTORE_BASE64    base64 of the upload keystore (alias "upload", see app/build.gradle.kts)
+#   RELEASE_KEYSTORE_PASSWORD  keystore password
+#   RELEASE_KEY_PASSWORD       key password
+
 on:
   push:
     tags:
@@ -30,33 +38,95 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Verify Tag Matches CHANGELOG
+      - name: Verify Tag Matches CHANGELOG and versionName
         run: |
+          set -euo pipefail
           tag="${GITHUB_REF#refs/tags/v}"
           echo "Verifying changelog section for tag: $tag"
           if ! grep -q "\[$tag\]" CHANGELOG.md; then
-            echo "ERROR: CHANGELOG.md missing section for version $tag"
+            echo "ERROR: CHANGELOG.md missing section for version $tag" >&2
+            exit 1
+          fi
+          declared="$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -n1)"
+          echo "app/build.gradle.kts declares versionName '$declared'"
+          if [ "$declared" != "$tag" ]; then
+            echo "ERROR: tag $tag does not match versionName '$declared' in app/build.gradle.kts" >&2
             exit 1
           fi
 
-      - name: Build Release Artifacts
+      - name: Check Signing Secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          chmod +x ./gradlew || true
-          RELEASE_VERSION="${GITHUB_REF#refs/tags/v}" ./gradlew assembleDebug test --no-daemon
+          set -euo pipefail
+          missing=""
+          [ -n "${KEYSTORE_BASE64:-}" ] || missing="$missing RELEASE_KEYSTORE_BASE64"
+          [ -n "${STORE_PASSWORD:-}" ] || missing="$missing RELEASE_KEYSTORE_PASSWORD"
+          [ -n "${KEY_PASSWORD:-}" ] || missing="$missing RELEASE_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "ERROR: missing repository secret(s):$missing" >&2
+            echo "A release tag must ship a signed artifact. Add them under Settings > Secrets > Actions." >&2
+            exit 1
+          fi
+
+      - name: Materialize Signing Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/apex-upload-key.jks"
+          test -s "$RUNNER_TEMP/apex-upload-key.jks"
+          echo "Keystore written to $RUNNER_TEMP/apex-upload-key.jks"
+
+      - name: Build and Sign Release Artifacts
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/apex-upload-key.jks
+          STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :app:assembleRelease :app:bundleRelease test --no-daemon
+
+      - name: Verify Signatures
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release.apk
+          aab=app/build/outputs/bundle/release/app-release.aab
+          for f in "$apk" "$aab"; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: expected release artifact missing: $f" >&2
+              ls -R app/build/outputs >&2 || true
+              exit 1
+            fi
+          done
+          apksigner="$(find "${ANDROID_HOME:?}/build-tools" -maxdepth 2 -name apksigner | sort | tail -n1)"
+          "$apksigner" verify --print-certs "$apk"
+          jarsigner -verify "$aab" > /dev/null
+          echo "APK and AAB signatures verified."
 
       - name: Install Cosign for Artifact Signing
         uses: sigstore/cosign-installer@v3
 
       - name: Generate Checksums and Sign Blobs
         run: |
-          cd app/build/outputs/apk/debug
-          for f in *.apk; do
-            sha256sum "$f" > "$f.sha256"
-          done
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release.apk
+          aab=app/build/outputs/bundle/release/app-release.aab
+          sha256sum "$apk" "$aab" > app/build/outputs/SHA256SUMS.txt
+          cat app/build/outputs/SHA256SUMS.txt
+          cosign sign-blob --yes --bundle "$apk.sigstore.json" "$apk"
+          cosign sign-blob --yes --bundle "$aab.sigstore.json" "$aab"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/debug/*.sha256
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/release/app-release.apk.sigstore.json
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/bundle/release/app-release.aab.sigstore.json
+            app/build/outputs/SHA256SUMS.txt

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.apex.security.audit.AuditLogManagerTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-05T02:50:52.309Z" hostname="localhost" time="0.002">
+  <properties/>
+  <testcase name="testGenesisRecordCreation" classname="com.apex.security.audit.AuditLogManagerTest" time="0.0"/>
+  <testcase name="testSequentialHashChainLinking" classname="com.apex.security.audit.AuditLogManagerTest" time="0.001"/>
+  <testcase name="testSha256Determinism" classname="com.apex.security.audit.AuditLogManagerTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

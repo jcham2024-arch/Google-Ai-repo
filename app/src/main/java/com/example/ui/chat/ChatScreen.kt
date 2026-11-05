@@ -31,15 +31,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
-import com.github.gfx.markdowncompose.Markdown
-import com.github.gfx.markdowncompose.MarkdownStyle
-import com.github.gfx.markdowncompose.MarkdownTheme
-import com.github.gfx.markdowncompose.InlineStyle
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.apex.core.port.model.ToolCall
 import com.apex.core.tool.ToolRegistry
 import com.apex.security.audit.AuditLogManager
+import com.apex.security.audit.FileAuditStore
 import com.apex.security.interlock.SecurityInterlock
 import com.apex.security.policy.RiskLevel
 import com.apex.security.policy.ToolRiskRegistry
@@ -600,81 +600,28 @@ fun ChatMessageItem(message: ChatMessage) {
                 if (isUser) {
                     Text(text = message.content, style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    // Render markdown for agent messages
+                    // Render markdown for agent messages. mikepenz -m3 derives its defaults from
+                    // MaterialTheme; only the deltas from the bubble styling are set explicitly.
                     Markdown(
-                        markdown = message.content,
-                        style = MarkdownStyle(
-                            theme = MarkdownTheme(
-                                codeBlockTheme = com.github.gfx.markdowncompose.CodeBlockTheme(
-                                    backgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    textColor = MaterialTheme.colorScheme.onSurfaceContainerHighest,
-                                    inlineCodeBackgroundColor = MaterialTheme.colorScheme.surfaceContainer,
-                                    inlineCodeTextColor = MaterialTheme.colorScheme.onSurfaceContainer
-                                ),
-                                blockQuoteTheme = com.github.gfx.markdowncompose.BlockQuoteTheme(
-                                    borderColor = MaterialTheme.colorScheme.outline,
-                                    backgroundColor = MaterialTheme.colorScheme.surfaceContainer,
-                                    textColor = MaterialTheme.colorScheme.onSurfaceContainer
-                                ),
-                                a = InlineStyle(
-                                    color = MaterialTheme.colorScheme.primary
-                                ),
-                                strong = InlineStyle(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                emph = InlineStyle(
-                                    fontStyle = androidx.compose.ui.text.style.FontStyle.Italic
-                                ),
-                                heading1 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading2 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading3 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading4 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading5 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                heading6 = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                paragraph = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 14.sp
-                                ),
-                                code = InlineStyle(
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.primary
-                                ),
-                                inlineCode = InlineStyle(
-                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                        content = message.content,
+                        colors = markdownColor(
+                            text = MaterialTheme.colorScheme.onSurfaceVariant,
+                            codeBackground = MaterialTheme.colorScheme.surfaceContainer,
+                            inlineCodeBackground = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        typography = markdownTypography(
+                            text = MaterialTheme.typography.bodyMedium,
+                            paragraph = MaterialTheme.typography.bodyMedium,
+                            code = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
                             ),
-                            inlineStyles = com.github.gfx.markdowncompose.InlineStyles(
-                                text = InlineStyle(
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 14.sp
-                                )
+                            inlineCode = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.primary
                             )
-                        )
+                        ),
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
 
@@ -794,9 +741,12 @@ fun rememberChatViewModel(chatId: String = "default"): ChatViewModel {
 
         val toolRegistry = ToolRegistry()
         val fileGovernanceEngine = FileGovernanceEngine(context)
-        toolRegistry.register(ReadFileToolWorker(context.filesDir))
-        toolRegistry.register(ReadFileRangeToolWorker(context.filesDir))
-        toolRegistry.register(WriteFileToolWorker(fileGovernanceEngine, context.filesDir))
+        // Every worker receives the same sandbox root as FileGovernanceEngine, so the read path
+        // cannot see more of the app's private storage than the write path can reach.
+        val sandboxRoot = fileGovernanceEngine.sandboxRoot
+        toolRegistry.register(ReadFileToolWorker(sandboxRoot))
+        toolRegistry.register(ReadFileRangeToolWorker(sandboxRoot))
+        toolRegistry.register(WriteFileToolWorker(fileGovernanceEngine, sandboxRoot))
         toolRegistry.register(HttpGetToolWorker())
         toolRegistry.register(HttpPostToolWorker())
         toolRegistry.register(RunCommandToolWorker())
@@ -816,7 +766,8 @@ fun rememberChatViewModel(chatId: String = "default"): ChatViewModel {
         riskRegistry.registerRisk("search_memory", RiskLevel.L2)
         riskRegistry.registerRisk("create_tool", RiskLevel.L3)
 
-        val auditLogManager = AuditLogManager()
+        // Durable, tamper-evident audit chain. The in-memory fallback is only for tests.
+        val auditLogManager = AuditLogManager(FileAuditStore(File(context.filesDir, "audit")))
 
         var viewModelRef: ChatViewModel? = null
         val approvalPort = AndroidApprovalPort(

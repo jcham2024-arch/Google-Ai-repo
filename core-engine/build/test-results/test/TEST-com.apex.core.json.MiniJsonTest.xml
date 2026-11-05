@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.apex.core.json.MiniJsonTest" tests="9" skipped="0" failures="0" errors="0" timestamp="2026-11-05T02:50:51.961Z" hostname="localhost" time="0.012">
+  <properties/>
+  <testcase name="testExtractFieldEscapedQuotesAndNewlines" classname="com.apex.core.json.MiniJsonTest" time="0.002"/>
+  <testcase name="testToJsonNullHandling" classname="com.apex.core.json.MiniJsonTest" time="0.0"/>
+  <testcase name="testEncodeList" classname="com.apex.core.json.MiniJsonTest" time="0.003"/>
+  <testcase name="testExtractFieldBasic" classname="com.apex.core.json.MiniJsonTest" time="0.0"/>
+  <testcase name="testInstanceMethods" classname="com.apex.core.json.MiniJsonTest" time="0.0"/>
+  <testcase name="testEscapeSpecialCharacters" classname="com.apex.core.json.MiniJsonTest" time="0.0"/>
+  <testcase name="testExtractFieldMissingOrNull" classname="com.apex.core.json.MiniJsonTest" time="0.0"/>
+  <testcase name="testToJsonPrimitivesAndMaps" classname="com.apex.core.json.MiniJsonTest" time="0.001"/>
+  <testcase name="testToJsonNestedCollections" classname="com.apex.core.json.MiniJsonTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

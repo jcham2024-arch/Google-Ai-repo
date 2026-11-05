@@ -21,8 +21,8 @@ class FileGovernanceEngine(private val context: Context) {
     private val _workspaceEvents = MutableStateFlow<WorkspaceEvent?>(null)
     val workspaceEvents: StateFlow<WorkspaceEvent?> = _workspaceEvents
 
-    // Sandbox configuration
-    private val sandboxRoot = File(context.filesDir, "workspace")
+    // Sandbox configuration. Every tool worker receives this same root.
+    val sandboxRoot = File(context.filesDir, "workspace")
     companion object {
         const val MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB per file
         const val MAX_TOTAL_SIZE_BYTES = 100 * 1024 * 1024 // 100MB total
@@ -39,32 +39,12 @@ class FileGovernanceEngine(private val context: Context) {
      * Returns the canonical path within the sandbox, or null if invalid.
      */
     private fun validatePath(path: String): File? {
-        return try {
-            // Normalize the path
-            val normalizedPath = path.trim().replace("\\", "/")
-            
-            // Reject absolute paths, empty paths, and paths with traversal attempts
-            if (normalizedPath.isEmpty() || normalizedPath.startsWith("/") || normalizedPath.contains("..")) {
-                return null
-            }
-            
-            // Resolve the path within the sandbox
-            val requestedFile = File(sandboxRoot, normalizedPath)
-            val canonicalSandbox = sandboxRoot.canonicalFile
-            val canonicalRequested = requestedFile.canonicalFile
-            
-            // Ensure the requested file is within the sandbox
-            if (!canonicalRequested.path.startsWith(canonicalSandbox.path)) {
-                return null
-            }
-            
-            // Additional check: ensure parent directory exists or can be created
-            canonicalRequested.parentFile?.mkdirs()
-            
-            canonicalRequested
-        } catch (e: Exception) {
-            null
-        }
+        val targetFile = WorkspacePathGuard.resolve(sandboxRoot, path) ?: return null
+
+        // Ensure the parent directory exists or can be created
+        targetFile.parentFile?.mkdirs()
+
+        return targetFile
     }
 
     /**
@@ -192,8 +172,7 @@ class FileGovernanceEngine(private val context: Context) {
         try {
             dao.deleteWorkspaceFile(path)
             // Keep version history for potential recovery
-            val physicalFile = File(context.filesDir, path)
-            physicalFile.delete()
+            targetFile.delete()
             _workspaceEvents.value = WorkspaceEvent.FileDeleted(path)
             true
         } catch (e: Exception) {

@@ -7,8 +7,8 @@ outside `docs/`.
 
 | File | Purpose |
 | :--- | :--- |
-| [workflows/ci.yml](../../.github/workflows/ci.yml) | CI pipeline on pushes to `main` and `phase/**` and on pull requests to `main`: JDK 17, Android SDK setup, guardrail steps C1, C2, C3, C4, C6, C8, C10, gitleaks secret scan (C5, non-blocking), `gradle test --no-daemon`, `gradle assembleDebug --no-daemon` |
-| [workflows/release.yml](../../.github/workflows/release.yml) | Tag-triggered release: verifies a matching `CHANGELOG.md` section, runs `gradle assembleDebug test`, installs cosign, writes SHA-256 files for the debug APKs, publishes a GitHub release |
+| [workflows/ci.yml](../../.github/workflows/ci.yml) | CI pipeline on pushes to `main` and `phase/**` and on pull requests to `main`: JDK 17, Android SDK setup, guardrail steps C1, C2, C3, C4, C6, C8, C10, gitleaks secret scan (C5, non-blocking), `./gradlew test --no-daemon`, `./gradlew assembleDebug --no-daemon` |
+| [workflows/release.yml](../../.github/workflows/release.yml) | Tag-triggered release: verifies a matching `CHANGELOG.md` section and matching `versionName`, requires the three signing secrets, decodes the upload keystore into `$RUNNER_TEMP`, runs `./gradlew :app:assembleRelease :app:bundleRelease test`, verifies both signatures, writes `SHA256SUMS.txt`, signs the APK and AAB blobs with cosign, publishes a GitHub release |
 | [ISSUE_TEMPLATE/bug_report.md](../../.github/ISSUE_TEMPLATE/bug_report.md) | Bug report template |
 | [ISSUE_TEMPLATE/feature_request.md](../../.github/ISSUE_TEMPLATE/feature_request.md) | Feature request template |
 | [pull_request_template.md](../../.github/pull_request_template.md) | Pull request checklist template |

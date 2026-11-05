@@ -15,18 +15,32 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.navArgument
-import androidx.navigation.compose.rememberNavController
-import com.example.ui.agents.AgentListScreen
-import com.example.ui.chat.ChatScreen
-import com.example.ui.conversations.ConversationListScreen
-import com.example.ui.settings.SettingsScreen
-import com.example.ui.workspace.WorkspaceScreen
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
+import androidx.activity.compose.rememberCoroutineScope
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.apex.core.port.model.ToolCall
+import com.apex.core.tool.ToolRegistry
+import com.apex.security.audit.AuditLogManager
+import com.apex.security.audit.FileAuditStore
+import com.apex.security.interlock.SecurityInterlock
+import com.apex.security.policy.RiskLevel
+import com.apex.security.policy.ToolRiskRegistry
+import com.example.data.local.AppDatabase
+import com.example.data.model.ChatMessage
+import com.example.data.model.ChatConversation
+import com.example.domain.engine.AgentOrchestrator
+import com.example.domain.engine.AndroidApprovalPort
 
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Chat : Screen("chat/{chatId}", "Agent Chat", Icons.Default.Chat)

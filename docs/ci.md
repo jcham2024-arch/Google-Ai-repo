@@ -71,10 +71,9 @@ All of these checks produce no output against the current tree.
 
 ## Known issues
 
-1. No Gradle wrapper is committed (`gradlew`, `gradle-wrapper.jar` are absent), while `ci.yml`,
-   `release.yml` and `CONTRIBUTING.md` reference `./gradlew`. The workflow happens to work because it
-   also calls bare `gradle`, which the runner provides; the `chmod +x ./gradlew || true` line is a
-   no-op. Either commit the wrapper or remove the references.
+1. The Gradle wrapper (`gradlew`, `gradlew.bat`, `gradle-wrapper.jar`) is committed and pinned to
+   9.3.1, so the `./gradlew` references resolve. The `chmod +x ./gradlew || true` line in the release
+   workflow is now redundant but harmless.
 2. Guardrails are `grep`-based and match text, not semantics. C8 fails on any line containing the
    substring `println` (a comment or a JSON key would trip it), and C10 only looks for the word
    `perchance` inside `app/src/main`, so other directories and other generator names are unchecked.

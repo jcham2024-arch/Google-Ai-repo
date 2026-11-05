@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.apex.security.audit.FileAuditStoreTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-05T02:50:52.273Z" hostname="localhost" time="0.034">
+  <properties/>
+  <testcase name="testAppendAndReadAll" classname="com.apex.security.audit.FileAuditStoreTest" time="0.02"/>
+  <testcase name="testMismatchedPrevHashThrowsException" classname="com.apex.security.audit.FileAuditStoreTest" time="0.002"/>
+  <testcase name="testStateRecoveryAfterReopening" classname="com.apex.security.audit.FileAuditStoreTest" time="0.004"/>
+  <testcase name="testRotation" classname="com.apex.security.audit.FileAuditStoreTest" time="0.003"/>
+  <testcase name="testTamperingDetection" classname="com.apex.security.audit.FileAuditStoreTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
