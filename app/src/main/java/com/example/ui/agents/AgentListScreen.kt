@@ -46,7 +46,7 @@ fun AgentListScreen() {
                         - read_file_range: Read specific line ranges of large files
                         - write_file: Write complete file contents (requires user approval)
                         - http_get/http_post: Make HTTP requests
-                        - run_command: Execute shell commands
+                        - run_command: Unavailable in this build (executes nothing, reports failure)
                         
                         When making code changes, ALWAYS follow this loop:
                         1. Use read_file to inspect the target file.

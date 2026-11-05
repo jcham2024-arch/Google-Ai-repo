@@ -30,16 +30,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/status.md`: verified implementation status, unresolved references with file and line numbers,
   tooling gaps, and an explicit list of what was not verified.
 
+### Fixed
+- `SecurityInterlock` denial paths (`DENIED_TOOLS_PAUSED`, `DENIED_BUDGET_EXHAUSTED`,
+  `DENIED_MALFORMED`) pass an argument map to `AuditLogManager.createAndAppend` as its signature
+  requires, and the denial reason is recorded inside the hashed argument domain through a new
+  `denialArguments` helper. `AuditLogManagerTest` uses the same canonicalizing overload.
+- `ReadFileToolWorker` and `ReadFileRangeToolWorker` validate every path through the new
+  `WorkspacePathGuard` and share the `filesDir/workspace` root with `FileGovernanceEngine`, closing a
+  `..` traversal and a `filesDir`-wide read surface. `FileGovernanceEngine.deleteFile` now deletes the
+  validated target instead of `File(filesDir, path)`.
+- `RunCommandToolWorker` fails closed with `UnsupportedOperationException` instead of returning
+  `"Executed command: ... [Status: OK]"` for a command it never ran; its description and the Master
+  Agent system prompt no longer advertise execution.
+- Production wires `AuditLogManager(FileAuditStore(filesDir/audit))`, so the SHA-256 audit chain is
+  persisted to `audit_active.jsonl` instead of being kept in memory.
+- Gradle wrapper committed (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`) pinned to
+  the 9.3.1 distribution, and `ci.yml` plus `release.yml` now invoke `./gradlew`.
+- `release.yml` builds and Gradle-signs `:app:assembleRelease` and `:app:bundleRelease`, requires the
+  three signing secrets, verifies both signatures with `apksigner` and `jarsigner`, writes
+  `SHA256SUMS.txt`, signs the APK and AAB blobs with cosign, and publishes the release artifacts
+  instead of debug APKs. It also fails the job when the tag does not match `versionName`.
+
+- The dead `com.github.gfx:markdown-compose` dependency (GitHub repo deleted, JitPack 401) is replaced
+  by `com.mikepenz:multiplatform-markdown-renderer-m3:0.40.0`; the ~90-line `MarkdownStyle` block in
+  `ChatScreen` is rewritten for the mikepenz `-m3` API (`markdownColor` / `markdownTypography`).
+
 ### Known gaps recorded (not fixed in this change)
-- `:app` has unresolved references (`ChatRepository.getInstance`, `getAgentOrchestrator`,
-  `OfflineSyncManager.getInstance`, `AgentOrchestrator.executeToolCall` signature, several Compose
-  API uses and imports listed in `docs/status.md`).
-- `:security-interface` has three `AuditLogManager.createAndAppend` call sites in `SecurityInterlock`
-  that pass a `String` where a `Map<String, String>` argument map is expected.
-- No Gradle wrapper is committed although CI, the release workflow and `CONTRIBUTING.md` reference
-  `./gradlew`.
-- Production constructs `AuditLogManager()` without a store, so audit records are in memory only.
-- `run_command` executes no process; `TokenBucketRateLimiter` is not wired into the transport.
+- `:app:compileDebugKotlin` fails with 286 Kotlin errors across 18 files, all pre-dating this change
+  series (measured, per-file counts and error classes in `docs/status.md` §2).
+- `run_command` remains registered in the tool registry and advertised in the model tool schema, so a
+  turn can still be spent on a call that always fails.
+- `TokenBucketRateLimiter` and `SystemStateManager` are not wired into the transport or the interlock.
+- Duplicate `ProviderConfigScreen` remains (`ui/ProviderConfigScreen.kt` and
+  `ui/settings/ProviderConfigScreen.kt`).
 
 ## [0.1.0] - 2026-11-03
 

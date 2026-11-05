@@ -27,11 +27,13 @@ implied no approval; the table above is the behaviour that is actually implement
    lower a level to avoid the approval prompt.
 2. Validate every argument before use; throw `IllegalArgumentException` for a missing or malformed
    value. There is no schema validation layer yet.
-3. Validate paths through `FileGovernanceEngine.validatePath` (rejects absolute paths, `..`, and
-   canonical escapes) instead of joining raw strings to a base directory. The read tools currently do
-   not do this.
-4. Never execute untrusted text as code, shell, or bytecode. `run_command` deliberately returns a
-   formatted string and executes nothing.
+3. Validate paths through `WorkspacePathGuard.resolve` (rejects absolute paths, `..`, and canonical
+   escapes) instead of joining raw strings to a base directory. `FileGovernanceEngine` and both read
+   workers share this object, and every worker receives the same `filesDir/workspace` root, so the
+   read surface cannot exceed the write surface.
+4. Never execute untrusted text as code, shell, or bytecode. `run_command` fails closed with
+   `UnsupportedOperationException` and executes nothing; it must never return a success string that
+   implies a side effect.
 5. Return informative messages without stack traces or absolute device paths.
 6. Keep output bounded; large results are truncated by `AgentOrchestrator.truncateToolResult` before
    returning to the model.
@@ -50,4 +52,4 @@ implied no approval; the table above is the behaviour that is actually implement
 | `http_post` | Sends model-chosen payloads to model-chosen URLs; an allow-list of hosts does not exist today |
 | `search_memory` / `save_memory` | Memory rows feed future prompts, so untrusted content can persist into later turns |
 | `write_file` | Validated by `FileGovernanceEngine`, capped at 10 MiB per file, versioned on every write |
-| `run_command` | Stub today; before implementing, decide the allowed command set, timeout, and output cap, and keep the level at L4 |
+| `run_command` | Refuses every call today; before implementing, decide the allowed command set, timeout, and output cap, and keep the level at L4 |

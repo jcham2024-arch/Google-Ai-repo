@@ -5,6 +5,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -18,6 +19,11 @@ public class AuditLogManagerTest {
 
     private AuditLogManager manager;
 
+    /** Argument maps are passed through the canonicalizing overload so hashing stays deterministic. */
+    private static Map<String, String> args(String key, String value) {
+        return Map.of(key, value);
+    }
+
     @Before
     public void setUp() {
         manager = new AuditLogManager();
@@ -25,7 +31,7 @@ public class AuditLogManagerTest {
 
     @Test
     public void testGenesisRecordCreation() {
-        AuditRecord rec1 = manager.createAndAppend(1000L, "read_file", "L0", "EXECUTED_OK", "{\"path\":\"a.txt\"}");
+        AuditRecord rec1 = manager.createAndAppend(1000L, "read_file", "L0", "EXECUTED_OK", args("path", "a.txt"));
         assertNotNull(rec1);
         assertEquals(AuditLogManager.GENESIS_HASH, rec1.getPreviousHash());
         assertNotNull(rec1.getEntryHash());
@@ -35,9 +41,9 @@ public class AuditLogManagerTest {
 
     @Test
     public void testSequentialHashChainLinking() {
-        AuditRecord rec1 = manager.createAndAppend(1000L, "read_file", "L0", "EXECUTED_OK", "{\"path\":\"a.txt\"}");
-        AuditRecord rec2 = manager.createAndAppend(1001L, "write_file", "L1", "EXECUTED_OK", "{\"path\":\"b.txt\"}");
-        AuditRecord rec3 = manager.createAndAppend(1002L, "run_cmd", "L4", "DENIED", "{\"cmd\":\"ls\"}");
+        AuditRecord rec1 = manager.createAndAppend(1000L, "read_file", "L0", "EXECUTED_OK", args("path", "a.txt"));
+        AuditRecord rec2 = manager.createAndAppend(1001L, "write_file", "L1", "EXECUTED_OK", args("path", "b.txt"));
+        AuditRecord rec3 = manager.createAndAppend(1002L, "run_cmd", "L4", "DENIED", args("cmd", "ls"));
 
         assertEquals(rec1.getEntryHash(), rec2.getPreviousHash());
         assertEquals(rec2.getEntryHash(), rec3.getPreviousHash());

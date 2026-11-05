@@ -22,20 +22,21 @@ app is remotely updateable, so users must install a new build.
 1. Revert the offending commit on `main`:
    `git revert <sha>` (prefer a revert commit over a history rewrite).
 2. Run the local checks before tagging:
-   `gradle test` and `gradle assembleDebug` (see the wrapper caveat below).
+   `./gradlew test` and `./gradlew :app:assembleRelease` (see the wrapper caveat below).
 3. Push the revert, then tag a patch release: `git tag vX.Y.Z+1 && git push origin vX.Y.Z+1`.
 4. Confirm the release workflow publishes the new artifacts; it refuses to run without a matching
    `[X.Y.Z]` section in `CHANGELOG.md`, so add the section first.
 
 ## Known workflow limitations
 
-- `.github/workflows/release.yml` calls `./gradlew`, but the repository has no Gradle wrapper, so the
-  release job fails at the build step as written (CI has a bare `gradle` fallback; the release
-  workflow does not).
-- The workflow builds **debug** APKs and generates `.sha256` files; cosign is installed but never
-  invoked, so artifacts are not signed by it.
-- Rollback does not restore local data on devices, and audit records are currently in memory only, so
-  no durable audit history exists to compare against across a rollback.
+- The Gradle wrapper is committed, but this workspace sits on shared storage, which is not
+  exec-capable: `./gradlew` fails there with `bad interpreter: Permission denied`. Run `sh gradlew`
+  on the phone; GitHub runners are unaffected.
+- The release workflow requires the three signing secrets and fails the job when one is missing, so a
+  tag pushed before those secrets exist produces no release rather than an unsigned one.
+- Rollback does not restore local data on devices. The audit chain is now written to
+  `filesDir/audit/audit_active.jsonl` in the app, but it lives on the device and is not shipped
+  anywhere, so it still cannot be compared across releases.
 
 ## Verification after rollback
 

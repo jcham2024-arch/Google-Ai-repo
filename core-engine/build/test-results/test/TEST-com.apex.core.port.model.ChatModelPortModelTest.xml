@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.apex.core.port.model.ChatModelPortModelTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-05T02:50:51.983Z" hostname="localhost" time="0.009">
+  <properties/>
+  <testcase name="testApprovalModels" classname="com.apex.core.port.model.ChatModelPortModelTest" time="0.001"/>
+  <testcase name="testAuditRecordContracts" classname="com.apex.core.port.model.ChatModelPortModelTest" time="0.005"/>
+  <testcase name="testChatRequestContracts" classname="com.apex.core.port.model.ChatModelPortModelTest" time="0.002"/>
+  <testcase name="testChatResponseOkAndError" classname="com.apex.core.port.model.ChatModelPortModelTest" time="0.001"/>
+  <testcase name="testToolCallAndExecutionResult" classname="com.apex.core.port.model.ChatModelPortModelTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

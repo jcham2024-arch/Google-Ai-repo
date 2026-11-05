@@ -37,11 +37,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+main
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
+Harness
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.apex.core.port.model.ToolCall
 import com.apex.core.tool.ToolRegistry
 import com.apex.security.audit.AuditLogManager
+import com.apex.security.audit.FileAuditStore
 import com.apex.security.interlock.SecurityInterlock
 import com.apex.security.policy.RiskLevel
 import com.apex.security.policy.ToolRiskRegistry
@@ -853,9 +859,12 @@ fun rememberChatViewModel(chatId: String = "default"): ChatViewModel {
 
         val toolRegistry = ToolRegistry()
         val fileGovernanceEngine = FileGovernanceEngine(context)
-        toolRegistry.register(ReadFileToolWorker(context.filesDir))
-        toolRegistry.register(ReadFileRangeToolWorker(context.filesDir))
-        toolRegistry.register(WriteFileToolWorker(fileGovernanceEngine, context.filesDir))
+        // Every worker receives the same sandbox root as FileGovernanceEngine, so the read path
+        // cannot see more of the app's private storage than the write path can reach.
+        val sandboxRoot = fileGovernanceEngine.sandboxRoot
+        toolRegistry.register(ReadFileToolWorker(sandboxRoot))
+        toolRegistry.register(ReadFileRangeToolWorker(sandboxRoot))
+        toolRegistry.register(WriteFileToolWorker(fileGovernanceEngine, sandboxRoot))
         toolRegistry.register(HttpGetToolWorker())
         toolRegistry.register(HttpPostToolWorker())
         toolRegistry.register(RunCommandToolWorker())
@@ -875,7 +884,8 @@ fun rememberChatViewModel(chatId: String = "default"): ChatViewModel {
         riskRegistry.registerRisk("search_memory", RiskLevel.L2)
         riskRegistry.registerRisk("create_tool", RiskLevel.L3)
 
-        val auditLogManager = AuditLogManager()
+        // Durable, tamper-evident audit chain. The in-memory fallback is only for tests.
+        val auditLogManager = AuditLogManager(FileAuditStore(File(context.filesDir, "audit")))
 
         var viewModelRef: ChatViewModel? = null
         val approvalPort = AndroidApprovalPort(

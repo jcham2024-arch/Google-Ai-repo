@@ -16,7 +16,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+main
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
@@ -30,6 +32,31 @@ import com.example.ui.control.ControlCenterScreen
 import com.example.ui.graph.GraphScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.workspace.WorkspaceScreen
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
+import androidx.activity.compose.rememberCoroutineScope
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
+import com.mikepenz.markdown.m3.markdownTypography
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.apex.core.port.model.ToolCall
+import com.apex.core.tool.ToolRegistry
+import com.apex.security.audit.AuditLogManager
+import com.apex.security.audit.FileAuditStore
+import com.apex.security.interlock.SecurityInterlock
+import com.apex.security.policy.RiskLevel
+import com.apex.security.policy.ToolRiskRegistry
+import com.example.data.local.AppDatabase
+import com.example.data.model.ChatMessage
+import com.example.data.model.ChatConversation
+import com.example.domain.engine.AgentOrchestrator
+import com.example.domain.engine.AndroidApprovalPort
+Harness
 
 import androidx.compose.material.icons.filled.Dns
 import com.example.ui.settings.ProviderConfigScreen

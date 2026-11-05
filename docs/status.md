@@ -32,8 +32,21 @@ because this environment has JDK 21 but no Gradle and no Android SDK installed.
 
 ## 2. Verified gaps in the application module
 
-These are unresolved references found by static inspection: the named member or symbol has no
-definition inside the module. Presume the app module does not compile until a build proves otherwise.
+A real `:app:compileDebugKotlin` run now exists. Result: **286 Kotlin errors across 18 files**, all
+pre-dating the current fix series (none originate in `WorkspacePathGuard`, the read workers,
+`RunCommandToolWorker`, the `FileAuditStore` wiring or the mikepenz `Markdown` block in
+`ChatScreen`). Per-file counts: `ChatScreen.kt` 79, `FileGovernanceEngine.kt` 40,
+`SearchMemoryToolWorker.kt` 24, `WorkspaceScreen.kt` 23, `AppNavigation.kt` 22,
+`ChatViewModel.kt` 21, `AndroidApprovalPort.kt` 15, KSP-generated `ApexDao_Impl.kt` 12,
+`AgentTaskWorker.kt` 9, `AIGateway.kt` 7, `WorkspaceExporter.kt` 7, `SaveMemoryToolWorker.kt` 6,
+`DelegateTaskToolWorker.kt` 6, `ConversationListScreen.kt` 5, `ChatRepositoryImpl.kt` 4,
+`AgentOrchestrator.kt` 3, `AppDatabase.kt` 2, `AgentListScreen.kt` 1. Dominant error classes:
+`'return' is prohibited here` (25), type-inference failures (24), `@Composable` context violations
+(18), `Unresolved reference 'it'` (8) and tokenizer-level syntax errors (8+5) that suggest
+structurally broken regions in `ChatScreen`, `WorkspaceScreen` and `AppNavigation`.
+
+The static list below was produced before the first build ran and is the evidence trail for the
+root causes behind those counts:
 
 | Location | Problem |
 | :--- | :--- |
@@ -52,32 +65,32 @@ definition inside the module. Presume the app module does not compile until a bu
 
 ## 2b. Verified gaps in the security module
 
-| Location | Problem |
-| :--- | :--- |
-| `security-interface/src/main/java/com/apex/security/interlock/SecurityInterlock.java:91,103,109` | Passes a `String` message where `AuditLogManager.createAndAppend(long, String, String, String, Map<String, String>)` expects an argument map; the only overload that exists takes a `Map`. These three paths do not compile. |
+No open entries. The three non-compiling `createAndAppend` call sites
+(`SecurityInterlock.java:91,103,109`) now pass an argument map through a `denialArguments` helper that
+keeps the denial reason inside the hashed audit domain, and the four stale string call sites in
+`AuditLogManagerTest` were moved to the canonicalizing overload.
 
 ## 2c. Verified wiring gaps that change documented behaviour
 
 | Area | Gap |
 | :--- | :--- |
-| Audit persistence | `ChatScreen.kt:819` builds `AuditLogManager()` with no `AuditStorePort`, so production keeps the chain in memory and writes no JSONL file. `FileAuditStore` is referenced only by tests (`AgentPipelineE2ETest`, `FileAuditStoreTest`). |
 | Rate limiting | `TokenBucketRateLimiter` is constructed only in `LoadSmokeTest`, never by `OkHttpTransport`, so provider calls are unthrottled and its counters never fire in the app. |
 | Operational states | `SystemStateManager` is never constructed and `transitionTo` is never called outside its own class, so `NORMAL`/`DEGRADED`/`SAFE_MODE` transitions do not happen automatically. |
-| Read-tool path safety | `ReadFileToolWorker` and `ReadFileRangeToolWorker` resolve `File(baseDir, path)` without calling `FileGovernanceEngine.validatePath`, so traversal safety depends on the caller-supplied `baseDir`. |
 | Room durability | `AppDatabase` uses `fallbackToDestructiveMigration()` with schema version 9 and `exportSchema = false`, so any schema change wipes user data and no schema history is emitted. |
-| Release workflow | `.github/workflows/release.yml` calls `./gradlew` (no wrapper exists) and has no bare `gradle` fallback, so it fails at the build step; it also builds debug APKs and installs cosign without invoking it. |
 
 ## 3. Verified gaps in tooling and process
 
 | Item | Current state |
 | :--- | :--- |
-| Gradle wrapper | No `gradlew` / `gradle/wrapper/gradle-wrapper.jar` in the repository, yet `ci.yml`, `release.yml` and `CONTRIBUTING.md` invoke `./gradlew` (CI also calls bare `gradle`). Drop the `./gradlew` invocations or commit a wrapper. |
+| Gradle wrapper | `gradlew`, `gradlew.bat` and `gradle/wrapper/gradle-wrapper.jar` are committed and match the 9.3.1 distribution pinned in `gradle-wrapper.properties`. Note that this workspace lives on shared storage, which is not exec-capable, so `./gradlew` fails here with `bad interpreter: Permission denied`; run `sh gradlew` on the phone. |
 | CI guardrail comment | `.github/workflows/ci.yml` implements C1, C2, C3, C4, C6, C8, C10 and runs gitleaks as C5. There is no C7, C9, C11–C13 step. The stale "C1 - C8" header comment was corrected in this documentation change; the numbering gap itself remains. |
 | Guardrail numbering | Numbering now agrees between `ci.yml`, `docs/ci.md` and `CONTRIBUTING.md`. C7 and C9 stay conventions implemented in code (`ToolInvocationInterceptor`, `SafeTelemetryDecorator`) with no CI step, and no step enforces test coverage for new public types. |
-| `run_command` tool | `RunCommandToolWorker` returns a formatted echo string; no process is executed. Documented behaviour is aspirational. |
+| `run_command` tool | `RunCommandToolWorker` fails closed with `UnsupportedOperationException` and executes nothing; it never reports a fabricated success. Still registered at L4 and still advertised in the model tool schema, so a turn can be spent on a call that always fails. |
+| Read-path sandbox root | `ReadFileToolWorker` and `ReadFileRangeToolWorker` now validate through `WorkspacePathGuard` against the same `filesDir/workspace` root as `FileGovernanceEngine`. Files outside that root are no longer readable by the model, which is a behaviour change from the previous `filesDir`-wide read surface. |
 | Rate limiting | `TokenBucketRateLimiter` implements `RateLimiterPort` but is used only by a test. |
 | Duplicate screen | `ui/ProviderConfigScreen.kt` and `ui/settings/ProviderConfigScreen.kt` both declare a composable `ProviderConfigScreen`; only the `ui.settings` copy is reachable from navigation. |
-| Composite build hygiene | The `:app` module ships Firebase (AI, Firestore, Auth, AppCheck), Retrofit/Moshi, Coil and markdown-compose. Documentation now states this; keep it in mind when reasoning about APK size, cold start and Play/Firebase requirements. |
+| Markdown renderer | `com.github.gfx:markdown-compose` is gone from GitHub and unresolvable from JitPack; `gradle/libs.versions.toml` now pins `com.mikepenz:multiplatform-markdown-renderer-m3:0.40.0`, the newest release whose Kotlin metadata the project's Kotlin 2.2.10 compiler can read (0.43.0+ are built with Kotlin 2.4). The `ChatScreen` render block uses the mikepenz `-m3` API. |
+| Composite build hygiene | The `:app` module ships Firebase (AI, Firestore, Auth, AppCheck), Retrofit/Moshi, Coil and markdown rendering. Documentation now states this; keep it in mind when reasoning about APK size, cold start and Play/Firebase requirements. |
 | Audit privacy | `FileAuditStore`/`AuditLogManager` store argument hashes, not raw arguments, but there is no argument-redaction policy for values such as tokens inside tool arguments beyond the hash. |
 
 ## 4. Not verified here

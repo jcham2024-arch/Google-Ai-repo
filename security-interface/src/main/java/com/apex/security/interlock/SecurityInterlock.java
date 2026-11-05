@@ -13,6 +13,8 @@ import com.apex.security.policy.BudgetExhaustedException;
 import com.apex.security.policy.RiskLevel;
 import com.apex.security.policy.ToolRiskRegistry;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -72,6 +74,19 @@ public class SecurityInterlock implements ToolExecutorPort {
      * Pauses or resumes tool execution globally.
      * When paused, all tool executions will be denied.
      */
+    /**
+     * Builds the audited argument map for a pre-execution denial: the original tool arguments plus
+     * the denial reason, so the reason is inside the hashed audit domain instead of being dropped.
+     */
+    private static Map<String, String> denialArguments(ToolCall toolCall, String reason) {
+        final Map<String, String> arguments = new LinkedHashMap<>();
+        if (toolCall != null && toolCall.getArguments() != null) {
+            arguments.putAll(toolCall.getArguments());
+        }
+        arguments.put("_reason", reason);
+        return arguments;
+    }
+
     public void setToolsPaused(boolean paused) {
         toolsPaused.set(paused);
     }
@@ -88,7 +103,8 @@ public class SecurityInterlock implements ToolExecutorPort {
         // Check if tools are paused (kill switch)
         if (toolsPaused.get()) {
             long now = System.currentTimeMillis();
-            auditLogManager.createAndAppend(now, toolCall != null ? toolCall.getToolName() : "unknown", "L3", "DENIED_TOOLS_PAUSED", "Tool execution paused by kill switch");
+            auditLogManager.createAndAppend(now, toolCall != null ? toolCall.getToolName() : "unknown", "L3", "DENIED_TOOLS_PAUSED",
+                denialArguments(toolCall, "Tool execution paused by kill switch"));
             throw new BudgetExhaustedException("Tool execution paused by kill switch");
         }
 
@@ -100,13 +116,15 @@ public class SecurityInterlock implements ToolExecutorPort {
         
         if (counter.incrementAndGet() > maxIterations) {
             long now = System.currentTimeMillis();
-            auditLogManager.createAndAppend(now, toolCall != null ? toolCall.getToolName() : "unknown", "L4", "DENIED_BUDGET_EXHAUSTED", "Max iterations exceeded for conversation: " + conversationId);
+            auditLogManager.createAndAppend(now, toolCall != null ? toolCall.getToolName() : "unknown", "L4", "DENIED_BUDGET_EXHAUSTED",
+                denialArguments(toolCall, "Max iterations exceeded for conversation: " + conversationId));
             throw new BudgetExhaustedException("Tool execution limit exceeded max iterations: " + maxIterations + " for conversation: " + conversationId);
         }
 
         if (toolCall == null || toolCall.getToolName() == null || toolCall.getToolName().trim().isEmpty()) {
             long now = System.currentTimeMillis();
-            auditLogManager.createAndAppend(now, "invalid_call", "L3", "DENIED_MALFORMED", "Tool call or tool name was null/empty");
+            auditLogManager.createAndAppend(now, "invalid_call", "L3", "DENIED_MALFORMED",
+                denialArguments(toolCall, "Tool call or tool name was null/empty"));
             return ExecutionResult.fail("", "Security denial: Malformed tool call.");
         }
 

@@ -1,9 +1,10 @@
 package com.example.domain.tools
 
 import com.apex.core.tool.ToolWorker
+import com.example.domain.engine.WorkspacePathGuard
 import java.io.File
 
-class ReadFileRangeToolWorker(private val baseDir: File) : ToolWorker {
+class ReadFileRangeToolWorker(private val sandboxRoot: File) : ToolWorker {
     override fun getName(): String = "read_file_range"
     override fun getDescription(): String = "Reads a specific range of lines from a file. Use this for large files to avoid context overflow."
 
@@ -12,7 +13,7 @@ class ReadFileRangeToolWorker(private val baseDir: File) : ToolWorker {
         val startLine = arguments["start_line"]?.toIntOrNull() ?: 1
         val endLine = arguments["end_line"]?.toIntOrNull() ?: Int.MAX_VALUE
         
-        val file = File(baseDir, path)
+        val file = WorkspacePathGuard.resolveOrThrow(sandboxRoot, path)
         if (!file.exists()) {
             throw NoSuchFileException(file, reason = "File not found: $path")
         }
