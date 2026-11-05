@@ -42,6 +42,9 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
@@ -50,6 +53,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import com.example.data.provider.ProviderPresets
 import com.example.data.provider.ProviderSettings
+import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -105,7 +109,8 @@ data class NodeSettingsProfile(
     val agentType: String = "Orchestrator",
     val instructions: String = "Execute tasks and coordinate node workflow in the multi-agent pipeline.",
     val tools: List<String> = listOf("Web Search", "File System", "Code Linter"),
-    val temperature: Float = 0.7f
+    val temperature: Float = 0.7f,
+    val documentation: String = "# Node Documentation\n\nAdd markdown-based notes, explainers, or architecture notes for this node."
 )
 
 data class GraphNodeData(
@@ -217,6 +222,8 @@ fun GraphScreen() {
     var importErrorMessage by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Canvas Pan & Zoom
     var panOffset by remember { mutableStateOf(Offset(0f, 0f)) }
@@ -439,6 +446,7 @@ fun GraphScreen() {
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -471,16 +479,37 @@ fun GraphScreen() {
                     }
 
                     IconButton(onClick = {
-                        runForceDirectedAutoLayout(nodes, pipelines)
+                        alignNodesToGrid(nodes, pipelines)
+                        fitCanvasToScreen(nodes, 900f, 600f) { scale, pan ->
+                            zoomScale = scale
+                            panOffset = pan
+                        }
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Canvas cleaned up: Grid aligned & Fit to screen")
+                        }
                     }) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = "Auto Layout", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.GridView, contentDescription = "Cleanup to Grid", tint = MaterialTheme.colorScheme.primary)
                     }
 
                     IconButton(onClick = {
-                        panOffset = Offset(0f, 0f)
-                        zoomScale = 1.0f
+                        fitCanvasToScreen(nodes, 900f, 600f) { scale, pan ->
+                            zoomScale = scale
+                            panOffset = pan
+                        }
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Fit to screen: ${(zoomScale * 100).roundToInt()}%")
+                        }
                     }) {
-                        Icon(Icons.Default.CenterFocusWeak, contentDescription = "Recenter View")
+                        Icon(Icons.Default.CenterFocusWeak, contentDescription = "Fit to Screen", tint = MaterialTheme.colorScheme.primary)
+                    }
+
+                    IconButton(onClick = {
+                        runForceDirectedAutoLayout(nodes, pipelines)
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Auto layout applied")
+                        }
+                    }) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "Auto Layout", tint = MaterialTheme.colorScheme.primary)
                     }
 
                     IconButton(onClick = { isSwarmPaused = !isSwarmPaused }) {
@@ -657,6 +686,8 @@ fun GraphScreen() {
                                 }
                             }
                     ) {
+                        val canvasWidthPx = constraints.maxWidth.toFloat()
+                        val canvasHeightPx = constraints.maxHeight.toFloat()
                         val outlineColor = MaterialTheme.colorScheme.outlineVariant
                         val activePipeColor = MaterialTheme.colorScheme.tertiary
                         val inactivePipeColor = MaterialTheme.colorScheme.outline
@@ -1060,15 +1091,134 @@ fun GraphScreen() {
                                     Icon(Icons.Default.ZoomIn, contentDescription = "Zoom In", modifier = Modifier.size(16.dp))
                                 }
 
+                                IconButton(
+                                    onClick = {
+                                        fitCanvasToScreen(nodes, canvasWidthPx, canvasHeightPx) { scale, pan ->
+                                            zoomScale = scale
+                                            panOffset = pan
+                                        }
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Fit to screen: ${(zoomScale * 100).roundToInt()}%")
+                                        }
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.CenterFocusWeak, contentDescription = "Fit to Screen", modifier = Modifier.size(16.dp))
+                                }
+
                                 VerticalDivider(modifier = Modifier.height(20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                                var showCleanupMenu by remember { mutableStateOf(false) }
+
+                                Box {
+                                    Button(
+                                        onClick = {
+                                            alignNodesToGrid(nodes, pipelines)
+                                            fitCanvasToScreen(nodes, canvasWidthPx, canvasHeightPx) { scale, pan ->
+                                                zoomScale = scale
+                                                panOffset = pan
+                                            }
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Canvas cleaned up: Grid aligned & Fit to screen")
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                                        contentPadding = PaddingValues(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.GridView,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            "Cleanup",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        IconButton(
+                                            onClick = { showCleanupMenu = true },
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.ArrowDropDown,
+                                                contentDescription = "Cleanup Options",
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = showCleanupMenu,
+                                        onDismissRequest = { showCleanupMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Clean Grid & Fit to Screen", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                showCleanupMenu = false
+                                                alignNodesToGrid(nodes, pipelines)
+                                                fitCanvasToScreen(nodes, canvasWidthPx, canvasHeightPx) { scale, pan ->
+                                                    zoomScale = scale
+                                                    panOffset = pan
+                                                }
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("Grid aligned & Fit to screen")
+                                                }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Align Nodes to Grid Only", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                showCleanupMenu = false
+                                                alignNodesToGrid(nodes, pipelines)
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("Nodes aligned into structured grid")
+                                                }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Fit to Screen (Reset Zoom/Pan)", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = { Icon(Icons.Default.CenterFocusWeak, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                showCleanupMenu = false
+                                                fitCanvasToScreen(nodes, canvasWidthPx, canvasHeightPx) { scale, pan ->
+                                                    zoomScale = scale
+                                                    panOffset = pan
+                                                }
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("Reset view to fit screen: ${(zoomScale * 100).roundToInt()}%")
+                                                }
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Force-Directed Auto Layout", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                            onClick = {
+                                                showCleanupMenu = false
+                                                runForceDirectedAutoLayout(nodes, pipelines)
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("Force-directed auto layout applied")
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
 
                                 Button(
                                     onClick = { runForceDirectedAutoLayout(nodes, pipelines) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(34.dp)
                                 ) {
-                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Auto Layout", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Text("Auto Layout", style = MaterialTheme.typography.labelSmall)
                                 }
 
                                 Button(
@@ -1425,6 +1575,87 @@ fun runForceDirectedAutoLayout(
     }
 }
 
+/**
+ * Aligns all graph nodes into a neat, balanced grid structure.
+ */
+fun alignNodesToGrid(
+    nodes: List<GraphNodeData>,
+    edges: List<PipelineEdge> = emptyList()
+) {
+    if (nodes.isEmpty()) return
+
+    // Sort nodes to arrange orchestrator/root nodes first, followed by downstream nodes
+    val sortedNodes = nodes.sortedWith(
+        compareBy(
+            { if (it.id == "node_orchestrator") 0 else 1 },
+            { node -> edges.count { it.toNodeId == node.id } },
+            { node -> -edges.count { it.fromNodeId == node.id } }
+        )
+    )
+
+    val numCols = when {
+        nodes.size <= 2 -> 2
+        nodes.size <= 6 -> 2
+        nodes.size <= 12 -> 3
+        else -> 4
+    }
+
+    val startX = 60f
+    val startY = 60f
+    val spacingX = 220f
+    val spacingY = 220f
+
+    sortedNodes.forEachIndexed { index, node ->
+        val col = index % numCols
+        val row = index / numCols
+        node.position = Offset(startX + col * spacingX, startY + row * spacingY)
+    }
+}
+
+/**
+ * Resets zoom and pan to a 'Fit to Screen' view for optimal canvas visibility.
+ */
+fun fitCanvasToScreen(
+    nodes: List<GraphNodeData>,
+    viewportWidth: Float,
+    viewportHeight: Float,
+    onUpdateTransform: (zoom: Float, pan: Offset) -> Unit
+) {
+    if (nodes.isEmpty()) {
+        onUpdateTransform(1.0f, Offset(0f, 0f))
+        return
+    }
+
+    val cardWidth = 140f
+    val cardHeight = 180f
+
+    val minX = nodes.minOf { it.position.x }
+    val maxX = nodes.maxOf { it.position.x + cardWidth }
+    val minY = nodes.minOf { it.position.y }
+    val maxY = nodes.maxOf { it.position.y + cardHeight }
+
+    val contentWidth = (maxX - minX).coerceAtLeast(100f)
+    val contentHeight = (maxY - minY).coerceAtLeast(100f)
+
+    val paddingX = 80f
+    val paddingY = 80f
+
+    val safeViewportW = (viewportWidth - paddingX * 2f).coerceAtLeast(100f)
+    val safeViewportH = (viewportHeight - paddingY * 2f).coerceAtLeast(100f)
+
+    val scaleX = safeViewportW / contentWidth
+    val scaleY = safeViewportH / contentHeight
+    val targetScale = minOf(scaleX, scaleY).coerceIn(0.4f, 1.5f)
+
+    val contentCenterX = (minX + maxX) / 2f
+    val contentCenterY = (minY + maxY) / 2f
+
+    val targetPanX = (viewportWidth / 2f) - (contentCenterX * targetScale)
+    val targetPanY = (viewportHeight / 2f) - (contentCenterY * targetScale)
+
+    onUpdateTransform(targetScale, Offset(targetPanX, targetPanY))
+}
+
 @Composable
 fun InteractiveCanvasNodeCard(
     node: GraphNodeData,
@@ -1514,6 +1745,20 @@ fun InteractiveCanvasNodeCard(
                             modifier = Modifier.size(10.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
+                    }
+
+                    if (node.settings.documentation.isNotBlank()) {
+                        IconButton(
+                            onClick = onOpenNodeSettings,
+                            modifier = Modifier.size(16.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Description,
+                                contentDescription = "View Node Documentation Notes",
+                                modifier = Modifier.size(10.dp),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                     }
 
                     IconButton(
@@ -2167,6 +2412,7 @@ fun NodeSettingsRightDrawer(
     var selectedAgentType by remember(node.settings) { mutableStateOf(node.settings.agentType) }
     var instructionsText by remember(node.settings) { mutableStateOf(node.settings.instructions) }
     var selectedTools by remember(node.settings) { mutableStateOf(node.settings.tools.toSet()) }
+    var documentationText by remember(node.settings) { mutableStateOf(node.settings.documentation) }
 
     var selectedTab by remember { mutableIntStateOf(0) }
 
@@ -2222,17 +2468,22 @@ fun NodeSettingsRightDrawer(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("Provider/Model", fontSize = 10.sp) }
+                    text = { Text("Provider", fontSize = 9.sp) }
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Instructions", fontSize = 10.sp) }
+                    text = { Text("Instructions", fontSize = 9.sp) }
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    text = { Text("Tools", fontSize = 10.sp) }
+                    text = { Text("Tools", fontSize = 9.sp) }
+                )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    text = { Text("Docs", fontSize = 9.sp) }
                 )
             }
 
@@ -2407,6 +2658,32 @@ fun NodeSettingsRightDrawer(
                             }
                         }
                     }
+
+                    3 -> {
+                        Text(
+                            text = "Node Documentation & Markdown Notes",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Add explainers, architecture notes, or team collaboration guidelines in Markdown.",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = documentationText,
+                            onValueChange = { documentationText = it },
+                            label = { Text("Markdown Documentation / Notes") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(240.dp),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                        )
+                    }
                 }
             }
 
@@ -2421,7 +2698,8 @@ fun NodeSettingsRightDrawer(
                         model = selectedModel,
                         agentType = selectedAgentType,
                         instructions = instructionsText,
-                        tools = selectedTools.toList()
+                        tools = selectedTools.toList(),
+                        documentation = documentationText
                     )
                     onSaveSettings(updatedProfile)
                     onClose()
